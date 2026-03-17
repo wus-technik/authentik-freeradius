@@ -22,6 +22,7 @@ services:
     environment:
       FREERADIUS_ENABLE_DEBUG: 'true'
       RADIUS_SECRET: 'testing123'
+      AUTHENTIK_RADIUS_SECRET: 'REDACTED'
     volumes:
       - /etc/letsencrypt/live/radius.example.com/fullchain.pem:/etc/raddb/certs/server.crt:ro
       - /etc/letsencrypt/live/radius.example.com/privkey.pem:/etc/raddb/certs/server.key:ro
