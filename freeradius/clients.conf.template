@@ -1,0 +1,13 @@
+client client {
+	ipaddr = 0.0.0.0/0
+	secret = "__RADIUS_SECRET__"
+	require_message_authenticator = yes
+}
+
+realm authentik {
+    type = radius
+    authhost = authentik_radius:1812
+    secret = "__AUTHENTIK_RADIUS_SECRET__"
+    nostrip
+}
+

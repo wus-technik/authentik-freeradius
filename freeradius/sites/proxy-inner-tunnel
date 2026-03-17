@@ -1,53 +1,19 @@
 server proxy-inner-tunnel {
-    listen {
-        ipaddr = *
-        port = 18121
-        type = auth
-    }
-
+    #
+    #  This example is very simple.  All inner tunnel requests get
+    #  proxied to another RADIUS server.
+    #
     authorize {
-        # Actually, this will proxy to authentik
-        files
-        eap
-        pap
-    }
-
-    authenticate {
-        Auth-Type PAP {
-            pap
-        }
-        eap
-    }
-
-    post-auth {
-        eap
-        #
-        #  These attributes are for the inner-tunnel only,
-        #  and MUST NOT be copied to the outer reply.
-        #
-        update reply {
-                User-Name !* ANY
-                Message-Authenticator !* ANY
-                EAP-Message !* ANY
-                Proxy-State !* ANY
-                MS-MPPE-Encryption-Types !* ANY
-                MS-MPPE-Encryption-Policy !* ANY
-                MS-MPPE-Send-Key !* ANY
-                MS-MPPE-Recv-Key !* ANY
-        }
-
-        #
-        #  Copy the inner reply attributes to the outer
-        #  session-state list.  The post-auth policy will take
-        #  care of copying the outer session-state list to the
-        #  outer reply.
-        #
-        update {
-                &outer.session-state: += &reply:
+        if (&User-Password) {
+            update control { Proxy-To-Realm := "authentik" }
         }
     }
 
     post-proxy {
+        eap
+    }
+
+    post-auth {
         eap
     }
 }

@@ -1,15 +1,14 @@
 eap {
 	default_eap_type = ttls
 
-	proxy_tunneld_request_as_eap = yes
-
 	tls-config tls-common {
 
 		private_key_file = ${certdir}/server.key
 		certificate_file = ${certdir}/server.crt
 		#ca_file = ${cadir}/ca.crt
+		ca_file = /etc/ca.crt
 		dh_file = ${certdir}/dh.pem
-		ca_path = /usr/share/ca-certificates/mozilla
+		#ca_path = /usr/share/ca-certificates/mozilla
 		cipher_list = "HIGH"
 		ecdh_curve = "secp384r1"
 		#include_root_ca = yes
@@ -42,9 +41,9 @@ eap {
 		tls = tls-common
 		default_eap_type = pap
 		copy_request_to_tunnel = yes
-		#use_tunneled_reply = yes
+		use_tunneled_reply = yes
+                proxy_tunneled_request_as_eap = no
 		include_length = yes
-		virtual_server = "inner-tunnel"
-		#virtual_server = "proxy-inner-tunnel"
+		virtual_server = "proxy-inner-tunnel"
 	}
 }
