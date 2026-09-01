@@ -35,6 +35,13 @@ services:
     volumes:
       - ./certs:/certs:ro
     networks: [e2e]
+    # Mirror docker-compose.yml's production hardening so the e2e suite
+    # actually exercises it instead of a softer configuration.
+    read_only: true
+    tmpfs:
+      - /run/radiusd
+      - /tmp/radiusd
+    cap_drop: [ALL]
 
   client:
     build: ./client

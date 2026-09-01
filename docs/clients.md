@@ -65,7 +65,8 @@ network={
 }
 ```
 
-Run with `sudo wpa_supplicant -d -c ./wpa2_supplicant.conf -i wlan0`.
+Save the block above as `wpa2_supplicant.conf`, then run with
+`sudo wpa_supplicant -d -c ./wpa2_supplicant.conf -i wlan0`.
 
 Do not omit `ca_cert` and `domain_suffix_match`. Without them the supplicant accepts any
 server and will hand the password to an impostor access point.

@@ -53,6 +53,12 @@ watch_certificates() {
 }
 
 if [ "${CERT_RELOAD_WATCH:-false}" = "true" ]; then
+	case "${CERT_RELOAD_INTERVAL:-3600}" in
+		''|*[!0-9]*)
+			die "CERT_RELOAD_INTERVAL must be a positive integer number of seconds (got '${CERT_RELOAD_INTERVAL}')"
+			;;
+	esac
+	echo "entrypoint: certificate watcher armed (interval ${CERT_RELOAD_INTERVAL:-3600}s)" >&2
 	# $$ is this shell, which exec below turns into the radiusd process.
 	watch_certificates "$$" &
 fi

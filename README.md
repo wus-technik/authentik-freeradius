@@ -35,6 +35,9 @@ This design is a workaround, and it has a real cost:
 Therefore: keep both containers on a private Docker network on a trusted host, never
 publish the outpost's RADIUS port, and use long random shared secrets
 (`openssl rand -hex 32`). Anyone who compromises this host can read staff passwords.
+- **Shared secrets are visible via container inspection.** They are passed as compose
+  environment variables, so anyone with Docker socket or Portainer access can read them
+  with `docker inspect` or Portainer's stack view.
 
 `FREERADIUS_ENABLE_DEBUG=true` logs the inner tunnel, cleartext passwords included. It is
 for development only.
