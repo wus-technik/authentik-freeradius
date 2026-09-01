@@ -1,0 +1,31 @@
+#  Loopback-only statistics listener.
+#
+#  A normal "type = auth" listener answers Status-Server with a bare
+#  Access-Accept -- that is what the container healthcheck uses. The internal
+#  counters (FreeRADIUS-Total-Access-Requests and friends) are returned ONLY
+#  by a "type = status" listener, so monitoring needs this second socket.
+#  Verified: without it, FreeRADIUS-Statistics-Type is accepted and ignored.
+#
+#  127.0.0.1 only. The secret is the per-start random one from entrypoint.sh,
+#  so these counters are reachable from inside the container and nowhere else
+#  -- reading them means `docker exec`, which already implies root on the host.
+server status {
+	listen {
+		type = status
+		ipaddr = 127.0.0.1
+		port = 18121
+	}
+
+	client status {
+		ipaddr = 127.0.0.1
+		secret = "$ENV{RADIUS_HEALTHCHECK_SECRET}"
+		require_message_authenticator = yes
+	}
+
+	authorize {
+		ok
+		Autz-Type Status-Server {
+			ok
+		}
+	}
+}

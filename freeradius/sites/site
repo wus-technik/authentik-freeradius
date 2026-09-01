@@ -7,6 +7,18 @@ server default {
 
     authorize {
         filter_username
+
+        #  Status-Server on this socket is the container healthcheck. It must
+        #  be answered explicitly: once any virtual server defines an
+        #  "Autz-Type Status-Server" section -- sites-enabled/status does --
+        #  the core stops replying Access-Accept by default and runs this
+        #  section instead, which otherwise falls through to Access-Reject.
+        #  Verified: removing this block turns the healthcheck permanently
+        #  unhealthy while authentication still works.
+        Autz-Type Status-Server {
+            ok
+        }
+
         eap {
             ok = return
         }
