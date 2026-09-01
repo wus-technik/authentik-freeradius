@@ -3,37 +3,45 @@ eap {
 
 	tls-config tls-common {
 
-		private_key_file = ${certdir}/server.key
-		certificate_file = ${certdir}/server.crt
-		#ca_file = ${cadir}/ca.crt
-		ca_file = /etc/ca.crt
-		dh_file = ${certdir}/dh.pem
-		#ca_path = /usr/share/ca-certificates/mozilla
+		#  Paths come from the environment so the certificates can live
+		#  anywhere the operator mounts them -- in production, inside the
+		#  read-only /etc/letsencrypt tree.
+		private_key_file = $ENV{TLS_KEY_PATH}
+		certificate_file = $ENV{TLS_CERT_PATH}
+
+		#  No ca_file. In a tls-config this is the trust anchor set for
+		#  CLIENT certificates, not the server's own chain -- auto_chain
+		#  plus a fullchain.pem handles that. Pointing it at a public root
+		#  store would mean any publicly-issued certificate is accepted as a
+		#  client identity the moment EAP-TLS is enabled.
+
+		#  No dh_file. FreeRADIUS 3.2 configures DH itself and logs
+		#  "this is no longer necessary" if one is supplied.
+
 		cipher_list = "HIGH"
 		ecdh_curve = "secp384r1"
-		#include_root_ca = yes
 		include_length = yes
 		fragment_size = 1024
 		auto_chain = yes
-		check_crl = yes
-		check_all_crl = yes
 		tls_min_version = "1.2"
-		tls_max_version = "1.3"
 
+		#  Not 1.3. FreeRADIUS 3.2's own eap comments advise against TLS 1.3
+		#  for EAP because many supplicants implement it poorly. The tunnel
+		#  carries one PAP exchange on a trusted LAN, so the gain is small
+		#  and the failure mode is "staff cannot join the WiFi". Raise this
+		#  only after per-platform client testing.
+		tls_max_version = "1.2"
+
+		#  Let's Encrypt stopped publishing OCSP URLs in early 2025 and shut
+		#  its responders down in August 2025, so there is nothing to staple.
+		#  ocsp validates CLIENT certificates and is inert for TTLS/PAP.
 		staple {
-			enable = yes
+			enable = no
 		}
 
 		ocsp {
-		   enable = yes
-		   lifetime = 24
-		   override_cert_url = no
+			enable = no
 		}
-
-	#	verify {
-	#		tmpdir = /tmp/radiusd
-	#		client = "/usr/bin/openssl verify -CAfile ${..ca_file} %{TLS-Client-Cert-Filename}"
-	#	}
 
 	}
 
@@ -41,8 +49,13 @@ eap {
 		tls = tls-common
 		default_eap_type = pap
 		copy_request_to_tunnel = yes
+
+		#  Carries authentik's reply attributes out of the tunnel. This is
+		#  what dynamic VLAN assignment will need; note it copies ALL inner
+		#  reply attributes outward.
 		use_tunneled_reply = yes
-                proxy_tunneled_request_as_eap = no
+
+		proxy_tunneled_request_as_eap = no
 		include_length = yes
 		virtual_server = "proxy-inner-tunnel"
 	}

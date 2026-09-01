@@ -1,0 +1,10 @@
+#  This repository's files are consumed by Linux containers. A CRLF line
+#  ending in a COPYed shell script yields `#!/bin/sh\r`, which fails with an
+#  obscure "no such file or directory" and crash-loops the container. Windows
+#  checkouts with core.autocrlf=true produce exactly that, and CI on Linux
+#  never reproduces it.
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+*.yml           text eol=lf
+.env.example    text eol=lf
+freeradius/**   text eol=lf
