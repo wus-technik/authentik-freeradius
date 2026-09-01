@@ -276,8 +276,22 @@ echo "   ok"
 
 echo "== 2/4 outage: stopping the outpost =="
 "${COMPOSE[@]}" stop authentik_radius >/dev/null
-# Drive enough traffic to move the home server alive -> zombie -> dead.
-for _ in 1 2 3; do auth || true; done
+
+# The home server must actually reach the "dead" state before recovery is
+# tested -- status checks only run against a dead home server, so restarting
+# the backend while it is merely "zombie" lets a broken status_check pass.
+# Wait for the state transition in the log rather than guessing at a sleep.
+deadline=$(( $(date +%s) + 120 ))
+while :; do
+	auth || true
+	if "${COMPOSE[@]}" logs freeradius 2>&1 | grep -q 'as dead'; then
+		break
+	fi
+	[ "$(date +%s)" -lt "$deadline" ] || fail "home server never reached the dead state within 120s; the outage test cannot prove anything"
+	sleep 5
+done
+echo "   home server is dead, as required"
+
 if auth; then fail "authentication succeeded while the outpost was stopped"; fi
 echo "   ok (correctly failing)"
 
@@ -312,7 +326,9 @@ git update-index --chmod=+x test/e2e/run.sh test/e2e/client/auth.sh 2>/dev/null 
 ./test/e2e/run.sh
 ```
 
-Expected: **FAIL** during `== building ==`. The root `Dockerfile` still generates DH parameters, still copies `freeradius/clients.conf.template`, and has no `freeradius/clients.conf` or `healthcheck.sh` to copy. This confirms the rig is actually exercising the image under test rather than passing vacuously.
+Expected: **FAIL**, before Task 2 is done. The old `Dockerfile` still builds (it copies `clients.conf.template` and generates DH parameters), so the failure comes later — at container startup or at `== 1/4 baseline authentication ==`, because the old entrypoint ignores `TLS_CERT_PATH` and looks for certificates under `${certdir}` where the rig has not put them.
+
+Do **not** require the failure to happen during `== building ==`. What matters is that the suite does not pass: that confirms it is genuinely exercising the image rather than succeeding vacuously.
 
 - [ ] **Step 7: Commit**
 
@@ -652,21 +668,27 @@ Expected: `PASS: all end-to-end checks succeeded`, with all four checks reportin
 
 - [ ] **Step 10: Prove the regression test actually detects the fault**
 
-A test that cannot fail is worthless. Temporarily break it and confirm the rig notices:
+A test that cannot fail is worthless. Break it deliberately and confirm the rig notices. The backup-and-restore shape matters: a bare `sed -i` leaves `clients.conf` broken if the run is interrupted, and that file is the one place where the fault is catastrophic.
 
 ```bash
-sed -i 's/status_check = none/status_check = status-server/' freeradius/clients.conf
-./test/e2e/run.sh; echo "exit=$?"
-```
+cp freeradius/clients.conf freeradius/clients.conf.bak
+sed 's/status_check = none/status_check = status-server/' \
+    freeradius/clients.conf.bak > freeradius/clients.conf
 
-Expected: **FAIL** at `== 3/4 recovery ==` with the "home server never revived" message and a non-zero exit. Then restore:
+if ./test/e2e/run.sh; then
+	cp freeradius/clients.conf.bak freeradius/clients.conf
+	rm -f freeradius/clients.conf.bak
+	echo "REGRESSION TEST IS BROKEN: the suite passed with status_check=status-server" >&2
+	exit 1
+fi
 
-```bash
-sed -i 's/status_check = status-server/status_check = none/' freeradius/clients.conf
+cp freeradius/clients.conf.bak freeradius/clients.conf
+rm -f freeradius/clients.conf.bak
+grep -q 'status_check = none' freeradius/clients.conf || { echo "restore failed" >&2; exit 1; }
 ./test/e2e/run.sh
 ```
 
-Expected: PASS again. Do not skip this step.
+Expected: the first run **fails** at `== 3/4 recovery ==` with the "home server never revived" message; the final run passes. Do not skip this step, and confirm `git diff freeradius/clients.conf` is empty afterwards.
 
 - [ ] **Step 11: Commit**
 
@@ -780,12 +802,11 @@ services:
       AUTHENTIK_TOKEN: ${AUTHENTIK_TOKEN:?set AUTHENTIK_TOKEN}
       AUTHENTIK_INSECURE: ${AUTHENTIK_INSECURE:-false}
       AUTHENTIK_LISTEN__METRICS: 0.0.0.0:9300
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9300/outpost.goauthentik.io/ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+    #  No healthcheck override. The image already ships
+    #  HEALTHCHECK ["CMD","/radius","healthcheck"] with a 5s interval and 20
+    #  retries, maintained upstream. Verified: it exits 1 while the outpost
+    #  cannot reach authentik and its metrics port is closed, which is exactly
+    #  the condition depends_on must wait through.
     networks: [radius]
     logging:
       driver: json-file
@@ -815,10 +836,12 @@ services:
     ports:
       - "${RADIUS_LISTEN_ADDR:-0.0.0.0}:1812:1812/udp"
     read_only: true
+    #  /var/run is a symlink to ../run in the Alpine image, so radiusd's
+    #  run_dir = /var/run/radiusd resolves to /run/radiusd. Verified: these two
+    #  tmpfs mounts are sufficient and a third on /var/run is redundant.
     tmpfs:
       - /run/radiusd
       - /tmp/radiusd
-      - /var/run
     cap_drop: [ALL]
     networks: [radius]
     logging:
@@ -1010,6 +1033,9 @@ jobs:
 
       - name: Check the FreeRADIUS configuration
         run: |
+          #  The default runner shell is `bash -e` WITHOUT pipefail, so the
+          #  `| tee` below would otherwise mask a non-zero radiusd exit.
+          set -euo pipefail
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
             -subj '/CN=radius.ci.test' -keyout key.pem -out cert.pem
           docker run --rm \
@@ -1023,7 +1049,7 @@ jobs:
             -e TLS_CERT_PATH=/certs/cert.pem \
             -e TLS_KEY_PATH=/certs/key.pem \
             --entrypoint /opt/sbin/radiusd \
-            akfr:ci -XC -d /etc/raddb | tee radiusd.log
+            akfr:ci -XC -d /etc/raddb 2>&1 | tee radiusd.log
           grep -q 'Configuration appears to be OK' radiusd.log
           ! grep -qiE 'no longer necessary|Failed resolving' radiusd.log
 
@@ -1597,7 +1623,7 @@ git commit -m "docs: link the deferred-work issues from the README"
 
 ```bash
 git clean -xdn                     # review what would be removed
-docker compose config -q --env-file .env.example
+docker compose --env-file .env.example config -q   # --env-file is a ROOT flag
 ./test/e2e/run.sh
 ```
 
@@ -1617,7 +1643,8 @@ gh run list --limit 1
 - [ ] **No secrets were committed**
 
 ```bash
-git log -p --all | grep -inE 'AUTHENTIK_TOKEN=.+|RADIUS_SECRET=.{8,}' | grep -v example
+git log -p --all -- . ':(exclude).env.example' \
+  | grep -inE 'AUTHENTIK_TOKEN=.+|(^|_)RADIUS_SECRET=.{8,}'
 ```
 
-Expected: no output.
+Expected: no output. Excluding by pathspec rather than filtering lines containing the word "example" avoids both false positives and, more importantly, false negatives.
