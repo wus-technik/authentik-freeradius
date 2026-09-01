@@ -870,17 +870,17 @@ IMAGE_TAG=latest
 #  --- authentik ------------------------------------------------------------
 AUTHENTIK_HOST=https://auth.example.com
 #  Outpost token from authentik.
-AUTHENTIK_TOKEN=
+AUTHENTIK_TOKEN=CHANGEME-outpost-token
 #  Set true only if authentik uses a certificate the outpost cannot verify.
 AUTHENTIK_INSECURE=false
 
 #  --- RADIUS secrets -------------------------------------------------------
 #  Between FreeRADIUS and the outpost. Must equal the shared secret configured
 #  on the RADIUS provider in authentik. Generate with: openssl rand -hex 32
-AUTHENTIK_RADIUS_SECRET=
+AUTHENTIK_RADIUS_SECRET=CHANGEME-run-openssl-rand-hex-32
 #  Between the UniFi APs and FreeRADIUS. Enter this in the UniFi RADIUS
 #  profile. Generate with: openssl rand -hex 32
-RADIUS_SECRET=
+RADIUS_SECRET=CHANGEME-run-openssl-rand-hex-32
 
 #  --- network --------------------------------------------------------------
 #  CIDR of the APs/controller allowed to send requests. Never 0.0.0.0/0.
@@ -926,6 +926,10 @@ docker compose config -q && echo "compose config OK"
 ```
 
 Expected: `compose config OK` with no warning about an obsolete `version` key.
+
+The placeholder values matter: `${VAR:?...}` errors on an *empty* value as well as an unset
+one, so leaving the secrets blank in `.env.example` would make this check — and the Final
+Verification — fail. `CHANGEME-…` keeps the guards meaningful while letting `config` validate.
 
 Then confirm a missing required variable is caught rather than silently defaulted:
 
