@@ -1,0 +1,373 @@
+zabbix_export:
+  version: '7.4'
+  template_groups:
+    - uuid: a571c0d144b14fd4a87a9d9b2aa9fcd6
+      name: Templates/Applications
+  templates:
+    - uuid: 4c1cf3b1e1d84f0e9b7d1f2a3c4d5e60
+      template: 'authentik-freeradius by Zabbix agent'
+      name: 'authentik-freeradius by Zabbix agent'
+      description: |
+        FreeRADIUS EAP-TTLS front-end for the authentik RADIUS outpost.
+        https://github.com/wus-technik/authentik-freeradius
+        
+        Requires on the Docker host:
+          install -m 0755 contrib/zabbix/zbx_radius_stats.sh /usr/local/bin/
+          /etc/zabbix/zabbix_agent2.d/radius.conf:
+            UserParameter=freeradius.stats[*],/usr/local/bin/zbx_radius_stats.sh "$1"
+            UserParameter=radius.cert.expiry[*],openssl x509 -enddate -noout -in "$1" | cut -d= -f2 | xargs -I{} date -d {} +%%s
+        
+        Container health is NOT covered here - attach "Docker by Zabbix agent 2"
+        as well, it already ships the health item and its unhealthy trigger.
+        See docs/monitoring.md.
+      vendor:
+        name: 'W&S Technik GmbH'
+        version: 7.4-1
+      groups:
+        - name: Templates/Applications
+      items:
+        - uuid: a1b2c3d4e5f6470880112233445566aa
+          name: 'FreeRADIUS: Statistics (raw)'
+          key: 'freeradius.stats[{$FREERADIUS.CONTAINER}]'
+          history: 1d
+          value_type: TEXT
+          description: 'FreeRADIUS Status-Server counters as JSON. Prints {} when radiusd does not answer.'
+          tags:
+            - tag: component
+              value: radius
+          triggers:
+            - uuid: b1b2c3d4e5f6470880112233445566ab
+              expression: 'length(last(/authentik-freeradius by Zabbix agent/freeradius.stats[{$FREERADIUS.CONTAINER}]))<5'
+              name: 'FreeRADIUS: radiusd is not answering Status-Server'
+              priority: DISASTER
+              description: 'The statistics listener returned nothing. radiusd is down, wedged, or the container is gone.'
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: a3b2c3d4e5f6470880112233445566aa
+          name: 'FreeRADIUS: Access-Accepts per second'
+          type: DEPENDENT
+          key: radius.accepts
+          value_type: FLOAT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[''FreeRADIUS-Total-Access-Accepts'']'
+            - type: CHANGE_PER_SECOND
+          master_item:
+            key: 'freeradius.stats[{$FREERADIUS.CONTAINER}]'
+          tags:
+            - tag: component
+              value: radius
+        - uuid: acb2c3d4e5f6470880112233445566aa
+          name: 'FreeRADIUS: Server certificate expiry'
+          key: 'radius.cert.expiry[{$FREERADIUS.CERT.PATH}]'
+          delay: 1h
+          history: 7d
+          value_type: FLOAT
+          units: unixtime
+          description: 'notAfter of the EAP server certificate, read from the file on the host. It cannot be probed over the network - it lives inside the EAP-TTLS tunnel.'
+          tags:
+            - tag: component
+              value: tls
+          triggers:
+            - uuid: bdb2c3d4e5f6470880112233445566ab
+              expression: '(last(/authentik-freeradius by Zabbix agent/radius.cert.expiry[{$FREERADIUS.CERT.PATH}]) - now()) / 86400 < {$FREERADIUS.CERT.CRIT.DAYS}'
+              name: 'FreeRADIUS: Server certificate expires in less than {$FREERADIUS.CERT.CRIT.DAYS} days'
+              priority: HIGH
+              tags:
+                - tag: scope
+                  value: availability
+            - uuid: bcb2c3d4e5f6470880112233445566ab
+              expression: '(last(/authentik-freeradius by Zabbix agent/radius.cert.expiry[{$FREERADIUS.CERT.PATH}]) - now()) / 86400 < {$FREERADIUS.CERT.WARN.DAYS}'
+              name: 'FreeRADIUS: Server certificate expires in less than {$FREERADIUS.CERT.WARN.DAYS} days'
+              priority: WARNING
+              description: 'The renewal did not happen. Note this is a separate fault from a renewed certificate the container never picked up (CERT_RELOAD_WATCH).'
+              dependencies:
+                - name: 'FreeRADIUS: Server certificate expires in less than {$FREERADIUS.CERT.CRIT.DAYS} days'
+                  expression: '(last(/authentik-freeradius by Zabbix agent/radius.cert.expiry[{$FREERADIUS.CERT.PATH}]) - now()) / 86400 < {$FREERADIUS.CERT.CRIT.DAYS}'
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: a5b2c3d4e5f6470880112233445566aa
+          name: 'FreeRADIUS: Access-Challenges per second'
+          type: DEPENDENT
+          key: radius.challenges
+          value_type: FLOAT
+          description: 'Several challenges per authentication is normal - EAP-TTLS is a round-trip sequence.'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[''FreeRADIUS-Total-Access-Challenges'']'
+            - type: CHANGE_PER_SECOND
+          master_item:
+            key: 'freeradius.stats[{$FREERADIUS.CONTAINER}]'
+          tags:
+            - tag: component
+              value: radius
+        - uuid: a6b2c3d4e5f6470880112233445566aa
+          name: 'FreeRADIUS: Dropped requests per second'
+          type: DEPENDENT
+          key: radius.dropped
+          value_type: FLOAT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[''FreeRADIUS-Total-Auth-Dropped-Requests'']'
+            - type: CHANGE_PER_SECOND
+          master_item:
+            key: 'freeradius.stats[{$FREERADIUS.CONTAINER}]'
+          tags:
+            - tag: component
+              value: radius
+          triggers:
+            - uuid: b6b2c3d4e5f6470880112233445566ab
+              expression: 'avg(/authentik-freeradius by Zabbix agent/radius.dropped,10m)>0'
+              name: 'FreeRADIUS: Requests are being dropped'
+              priority: AVERAGE
+              tags:
+                - tag: scope
+                  value: performance
+        - uuid: a8b2c3d4e5f6470880112233445566aa
+          name: 'FreeRADIUS: Invalid requests per second'
+          type: DEPENDENT
+          key: radius.invalid
+          value_type: FLOAT
+          description: 'Bad shared secret or a bad Message-Authenticator. Cross-check the log trigger for "invalid Message-Authenticator".'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[''FreeRADIUS-Total-Auth-Invalid-Requests'']'
+            - type: CHANGE_PER_SECOND
+          master_item:
+            key: 'freeradius.stats[{$FREERADIUS.CONTAINER}]'
+          tags:
+            - tag: component
+              value: radius
+          triggers:
+            - uuid: b8b2c3d4e5f6470880112233445566ab
+              expression: 'avg(/authentik-freeradius by Zabbix agent/radius.invalid,15m)>0'
+              name: 'FreeRADIUS: Invalid requests received (shared secret mismatch?)'
+              priority: AVERAGE
+              description: 'An AP is using the wrong RADIUS_SECRET, or something unauthorized is probing port 1812.'
+              tags:
+                - tag: scope
+                  value: security
+        - uuid: a7b2c3d4e5f6470880112233445566aa
+          name: 'FreeRADIUS: Malformed requests per second'
+          type: DEPENDENT
+          key: radius.malformed
+          value_type: FLOAT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[''FreeRADIUS-Total-Auth-Malformed-Requests'']'
+            - type: CHANGE_PER_SECOND
+          master_item:
+            key: 'freeradius.stats[{$FREERADIUS.CONTAINER}]'
+          tags:
+            - tag: component
+              value: radius
+        - uuid: aab2c3d4e5f6470880112233445566aa
+          name: 'FreeRADIUS: Proxied accepts per second'
+          type: DEPENDENT
+          key: radius.proxy_accepts
+          value_type: FLOAT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[''FreeRADIUS-Total-Proxy-Access-Accepts'']'
+            - type: CHANGE_PER_SECOND
+          master_item:
+            key: 'freeradius.stats[{$FREERADIUS.CONTAINER}]'
+          tags:
+            - tag: component
+              value: outpost
+        - uuid: abb2c3d4e5f6470880112233445566aa
+          name: 'FreeRADIUS: Proxied requests dropped per second'
+          type: DEPENDENT
+          key: radius.proxy_dropped
+          value_type: FLOAT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[''FreeRADIUS-Total-Proxy-Auth-Dropped-Requests'']'
+            - type: CHANGE_PER_SECOND
+          master_item:
+            key: 'freeradius.stats[{$FREERADIUS.CONTAINER}]'
+          tags:
+            - tag: component
+              value: outpost
+        - uuid: a9b2c3d4e5f6470880112233445566aa
+          name: 'FreeRADIUS: Proxied requests per second'
+          type: DEPENDENT
+          key: radius.proxy_requests
+          value_type: FLOAT
+          description: 'Inner PAP forwarded to the authentik outpost.'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[''FreeRADIUS-Total-Proxy-Access-Requests'']'
+            - type: CHANGE_PER_SECOND
+          master_item:
+            key: 'freeradius.stats[{$FREERADIUS.CONTAINER}]'
+          tags:
+            - tag: component
+              value: outpost
+        - uuid: a4b2c3d4e5f6470880112233445566aa
+          name: 'FreeRADIUS: Access-Rejects per second'
+          type: DEPENDENT
+          key: radius.rejects
+          value_type: FLOAT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[''FreeRADIUS-Total-Access-Rejects'']'
+            - type: CHANGE_PER_SECOND
+          master_item:
+            key: 'freeradius.stats[{$FREERADIUS.CONTAINER}]'
+          tags:
+            - tag: component
+              value: radius
+        - uuid: a2b2c3d4e5f6470880112233445566aa
+          name: 'FreeRADIUS: Access-Requests per second'
+          type: DEPENDENT
+          key: radius.requests
+          value_type: FLOAT
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$[''FreeRADIUS-Total-Access-Requests'']'
+            - type: CHANGE_PER_SECOND
+          master_item:
+            key: 'freeradius.stats[{$FREERADIUS.CONTAINER}]'
+          tags:
+            - tag: component
+              value: radius
+          triggers:
+            - uuid: c1b2c3d4e5f6470880112233445566ac
+              expression: 'avg(/authentik-freeradius by Zabbix agent/radius.requests,{$FREERADIUS.DEADAIR.PERIOD})=0'
+              name: 'FreeRADIUS: No authentication traffic for {$FREERADIUS.DEADAIR.PERIOD}'
+              priority: HIGH
+              description: |
+                Dead air. Every silent failure mode of this stack shows up as no traffic
+                rather than as errors: a renewed certificate the container never picked up,
+                a home server marked dead, an AP profile changed in UniFi.
+                Suppress out of hours if the site is genuinely idle at night.
+              dependencies:
+                - name: 'FreeRADIUS: radiusd is not answering Status-Server'
+                  expression: 'length(last(/authentik-freeradius by Zabbix agent/freeradius.stats[{$FREERADIUS.CONTAINER}]))<5'
+              tags:
+                - tag: scope
+                  value: availability
+      macros:
+        - macro: '{$FREERADIUS.CERT.CRIT.DAYS}'
+          value: '3'
+          description: 'Certificate expiry, high severity threshold in days.'
+        - macro: '{$FREERADIUS.CERT.PATH}'
+          value: /etc/letsencrypt/live/radius.example.com/fullchain.pem
+          description: 'Host path of the EAP server certificate. Must match TLS_CERT_PATH resolved on the host side.'
+        - macro: '{$FREERADIUS.CERT.WARN.DAYS}'
+          value: '14'
+          description: 'Certificate expiry, warning threshold in days.'
+        - macro: '{$FREERADIUS.CONTAINER}'
+          value: freeradius
+          description: 'Container name. Under a Portainer stack usually <stack>_freeradius_1 or <stack>-freeradius-1.'
+        - macro: '{$FREERADIUS.DEADAIR.PERIOD}'
+          value: 1h
+          description: 'How long with zero Access-Requests counts as an outage.'
+        - macro: '{$FREERADIUS.REJECT.MIN.RATE}'
+          value: '0.01'
+          description: 'Minimum request rate before the reject-ratio trigger is allowed to fire.'
+      dashboards:
+        - uuid: d1b2c3d4e5f6470880112233445566ad
+          name: FreeRADIUS
+          pages:
+            - widgets:
+                - type: svggraph
+                  width: '36'
+                  height: '5'
+                  fields:
+                    - type: STRING
+                      name: ds.0.color
+                      value: 1F60C4
+                    - type: STRING
+                      name: ds.0.hosts.0
+                      value: '*'
+                    - type: STRING
+                      name: ds.0.items.0
+                      value: 'FreeRADIUS: Access-Requests per second'
+                    - type: STRING
+                      name: ds.1.color
+                      value: 2ED12E
+                    - type: STRING
+                      name: ds.1.hosts.0
+                      value: '*'
+                    - type: STRING
+                      name: ds.1.items.0
+                      value: 'FreeRADIUS: Access-Accepts per second'
+                    - type: STRING
+                      name: ds.2.color
+                      value: E33734
+                    - type: STRING
+                      name: ds.2.hosts.0
+                      value: '*'
+                    - type: STRING
+                      name: ds.2.items.0
+                      value: 'FreeRADIUS: Access-Rejects per second'
+                    - type: STRING
+                      name: reference
+                      value: AAAAA
+                - type: svggraph
+                  'y': '5'
+                  width: '36'
+                  height: '5'
+                  fields:
+                    - type: STRING
+                      name: ds.0.color
+                      value: 1F60C4
+                    - type: STRING
+                      name: ds.0.hosts.0
+                      value: '*'
+                    - type: STRING
+                      name: ds.0.items.0
+                      value: 'FreeRADIUS: Proxied requests per second'
+                    - type: STRING
+                      name: ds.1.color
+                      value: 2ED12E
+                    - type: STRING
+                      name: ds.1.hosts.0
+                      value: '*'
+                    - type: STRING
+                      name: ds.1.items.0
+                      value: 'FreeRADIUS: Proxied accepts per second'
+                    - type: STRING
+                      name: reference
+                      value: BBBBB
+  triggers:
+    - uuid: c2b2c3d4e5f6470880112233445566ac
+      expression: |
+        avg(/authentik-freeradius by Zabbix agent/radius.rejects,15m)>avg(/authentik-freeradius by Zabbix agent/radius.accepts,15m)
+        and avg(/authentik-freeradius by Zabbix agent/radius.requests,15m)>{$FREERADIUS.REJECT.MIN.RATE}
+      name: 'FreeRADIUS: More rejects than accepts over 15m'
+      priority: AVERAGE
+      description: 'Guarded by a minimum request rate so a single failed login on a quiet night does not alert.'
+      tags:
+        - tag: scope
+          value: availability
+    - uuid: c3b2c3d4e5f6470880112233445566ac
+      expression: |
+        avg(/authentik-freeradius by Zabbix agent/radius.proxy_requests,10m)>0
+        and avg(/authentik-freeradius by Zabbix agent/radius.proxy_accepts,10m)=0
+      name: 'FreeRADIUS: The authentik outpost is not answering'
+      priority: HIGH
+      description: |
+        We are proxying inner PAP and getting nothing back. With status_check = none
+        a home server marked dead never revives on its own - check the log for
+        "Marking home server ... as dead" and restart the outpost.
+      dependencies:
+        - name: 'FreeRADIUS: radiusd is not answering Status-Server'
+          expression: 'length(last(/authentik-freeradius by Zabbix agent/freeradius.stats[{$FREERADIUS.CONTAINER}]))<5'
+      tags:
+        - tag: scope
+          value: availability

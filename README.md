@@ -60,6 +60,7 @@ startup, so without it the container serves the old certificate until someone re
 - [docs/unifi.md](docs/unifi.md) — RADIUS profile and SSID
 - [docs/clients.md](docs/clients.md) — Windows, Android, iOS, Linux
 - [docs/troubleshooting.md](docs/troubleshooting.md) — when it does not work
+- [docs/monitoring.md](docs/monitoring.md) — Zabbix integration
 
 ## Development
 
