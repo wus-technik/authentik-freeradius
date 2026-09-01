@@ -197,7 +197,7 @@ this block** — it is a change you would have to make.
 
 ## 3. authentik outpost metrics
 
-*Unverified locally — the outpost only opens this port once it can reach authentik.*
+*Unverified locally — the outpost only opens this port once it can reach authentik. Finishing this off is [#6](https://github.com/wus-technik/authentik-freeradius/issues/6).*
 
 The outpost already serves Prometheus metrics: `AUTHENTIK_LISTEN__METRICS: 0.0.0.0:9300`
 is set in `docker-compose.yml`. The port is not published, so bind it to loopback:
