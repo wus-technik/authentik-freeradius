@@ -146,8 +146,9 @@ The `authhost` form is FreeRADIUS 2 syntax, deprecated in 3.x. Besides deprecati
 gives no home-server health checking: if the authentik outpost dies, requests are
 blackholed rather than failed fast.
 
-**Fix:** `home_server` / `home_server_pool` / `realm … auth_pool` with `status_check`,
-`response_window` and `revive_interval`.
+**Fix:** `home_server` / `home_server_pool` / `realm … auth_pool` with `response_window`
+and `revive_interval`, so a dead outpost fails fast and recovers on its own. Note that
+`status_check` must be left at `none` — see 4.12, where enabling it proved catastrophic.
 
 ### 4.8 Non-reproducible, unpinned image build (`Dockerfile`)
 
