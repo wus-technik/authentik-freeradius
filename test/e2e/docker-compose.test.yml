@@ -1,0 +1,48 @@
+name: akfr-e2e
+
+services:
+  authentik_radius:
+    build: ./backend
+    networks: [e2e]
+
+  certgen:
+    build: ./client
+    volumes:
+      - ./certs:/out
+    command:
+      - sh
+      - -c
+      - >-
+        test -f /out/server.crt ||
+        openssl req -x509 -newkey rsa:2048 -nodes -days 3650
+        -subj '/CN=radius.e2e.test'
+        -keyout /out/server.key -out /out/server.crt
+
+  freeradius:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    depends_on:
+      authentik_radius:
+        condition: service_started
+    environment:
+      AUTHENTIK_RADIUS_HOST: authentik_radius
+      AUTHENTIK_RADIUS_SECRET: backendsecret
+      RADIUS_SECRET: uplinksecret
+      RADIUS_CLIENT_NET: 0.0.0.0/0
+      TLS_CERT_PATH: /certs/server.crt
+      TLS_KEY_PATH: /certs/server.key
+    volumes:
+      - ./certs:/certs:ro
+    networks: [e2e]
+
+  client:
+    build: ./client
+    environment:
+      RADIUS_SECRET: uplinksecret
+    networks: [e2e]
+    entrypoint: ["/auth.sh"]
+
+networks:
+  e2e:
+    driver: bridge
