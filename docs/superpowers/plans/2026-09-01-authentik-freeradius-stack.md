@@ -28,6 +28,23 @@ Copy these values verbatim. Every task's requirements implicitly include this se
 - **Language:** all committed text — code comments, docs, commit messages, issue bodies — in English.
 - **Commit trailers:** never add a Claude/AI co-author trailer.
 
+## Pre-verified during planning
+
+These were run against real containers before this plan was written, so an executor hitting
+a failure in one of them should suspect a transcription error rather than a design fault:
+
+- `mods/eap` with **no `ca_file` and no `dh_file`**, `tls_max_version = "1.2"`, `$ENV{}`
+  certificate paths — `radiusd -XC` clean, full EAP-TTLS handshake `SUCCESS` with MPPE keys.
+- `entrypoint.sh` exactly as written in Task 2 Step 4 — fail-fast messages fire correctly
+  for both a missing environment variable and a missing certificate mount.
+- `healthcheck.sh` as written in Task 2 Step 5 — the container reaches `healthy`.
+- `CERT_RELOAD_WATCH=true` — modifying the certificate on the host restarts the container,
+  which comes back `healthy`. The `$$`-before-`exec` trick for signalling radiusd works.
+- `read_only: true` + `cap_drop: [ALL]` with tmpfs on `/run/radiusd`, `/tmp/radiusd` and
+  `/var/run` — container healthy, authentication working.
+- The image contains **no `openssl`**, confirming the DH removal dropped that dependency.
+  This is why the e2e rig generates its certificate from the *client* image.
+
 ## Design decision resolved during planning
 
 Spec §8 left open whether the home-server address should be a literal (`authentik_radius`) or an `$ENV{}` variable. **This plan uses `$ENV{AUTHENTIK_RADIUS_HOST}`.** FreeRADIUS resolves `home_server` hostnames at config-parse time, so a literal makes `radiusd -XC` fail outside a Compose network; the variable lets CI set `127.0.0.1` and removes the need for `--add-host`. Compose sets it to `authentik_radius`.
@@ -623,7 +640,7 @@ docker run --rm \
 
 Expected: ends with `Configuration appears to be OK`, and the output contains **no** line matching `dh_file`, `no longer necessary`, or `Failed resolving`.
 
-**If it fails complaining about a missing `ca_file`:** the removal in Step 2 was one step too far. Restore a single line, `ca_file = $ENV{TLS_CERT_PATH}`, pointing at the server's own chain rather than a public root store, and note it in the commit message. Do not point it at `/etc/ssl/certs/ca-certificates.crt`.
+**[verified]** This exact configuration — no `ca_file`, no `dh_file`, `tls_max_version = "1.2"`, `$ENV{}` paths — was run against FreeRADIUS 3.2.10 during planning. `-XC` passes clean and a full EAP-TTLS handshake completes (`SUCCESS`, MPPE keys OK). Omitting `ca_file` needs no fallback.
 
 - [ ] **Step 9: Run the end-to-end test**
 
@@ -1067,7 +1084,7 @@ jobs:
           sbom: true
 ```
 
-Note on `type=raw,value=latest,enable={{is_default_branch}}`: the repository's default branch is `develop`, so confirm with `gh repo view --json defaultBranchRef` whether `latest` should track `develop` or `main`. If `main` is intended, replace that line with `type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}`.
+Note on `type=raw,value=latest,enable={{is_default_branch}}`: **confirmed and intended.** The repository's default branch is `develop`, so `latest` tracks `develop`. Leave this line as written — do not change it to `main`. The compose file's `IMAGE_TAG` defaults to `latest`, so a deployed stack follows `develop`; pin `IMAGE_TAG` to a semver tag in Portainer for anything you do not want moving.
 
 - [ ] **Step 2: Verify the workflow parses**
 
