@@ -40,8 +40,10 @@ a failure in one of them should suspect a transcription error rather than a desi
 - `healthcheck.sh` as written in Task 2 Step 5 — the container reaches `healthy`.
 - `CERT_RELOAD_WATCH=true` — modifying the certificate on the host restarts the container,
   which comes back `healthy`. The `$$`-before-`exec` trick for signalling radiusd works.
-- `read_only: true` + `cap_drop: [ALL]` with tmpfs on `/run/radiusd`, `/tmp/radiusd` and
-  `/var/run` — container healthy, authentication working.
+- `read_only: true` + `cap_drop: [ALL]` with tmpfs on `/run/radiusd` and `/tmp/radiusd`
+  only — container healthy, authentication working. `/var/run` is a symlink to `../run` in
+  the Alpine image, so radiusd's `run_dir` already resolves into the first tmpfs; a third
+  mount on `/var/run` is redundant and was verified unnecessary.
 - The image contains **no `openssl`**, confirming the DH removal dropped that dependency.
   This is why the e2e rig generates its certificate from the *client* image.
 
