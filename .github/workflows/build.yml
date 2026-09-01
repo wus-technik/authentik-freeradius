@@ -1,0 +1,136 @@
+name: build
+
+on:
+  push:
+    branches: [develop, main]
+    tags: ['v*']
+  pull_request:
+    branches: [develop, main]
+  schedule:
+    #  Weekly, to pick up base-image security fixes.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Lint the Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+
+      - name: Lint the shell scripts
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck freeradius/entrypoint.sh freeradius/healthcheck.sh \
+                     test/e2e/client/auth.sh test/e2e/run.sh
+
+  validate:
+    #  Configuration syntax gate. Necessary but NOT sufficient -- radiusd -XC
+    #  happily accepts a status_check setting that permanently breaks
+    #  authentication, which is why the e2e job exists.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build the image for testing
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: akfr:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Check the FreeRADIUS configuration
+        run: |
+          #  The default runner shell is `bash -e` WITHOUT pipefail, so the
+          #  `| tee` below would otherwise mask a non-zero radiusd exit.
+          set -euo pipefail
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -subj '/CN=radius.ci.test' -keyout key.pem -out cert.pem
+          docker run --rm \
+            -v "$PWD/cert.pem:/certs/cert.pem:ro" \
+            -v "$PWD/key.pem:/certs/key.pem:ro" \
+            -e RADIUS_CLIENT_NET=10.0.0.0/8 \
+            -e RADIUS_SECRET='se/cret&with\weird$chars' \
+            -e RADIUS_HEALTHCHECK_SECRET=dummy \
+            -e AUTHENTIK_RADIUS_HOST=127.0.0.1 \
+            -e AUTHENTIK_RADIUS_SECRET='an/other&secret' \
+            -e TLS_CERT_PATH=/certs/cert.pem \
+            -e TLS_KEY_PATH=/certs/key.pem \
+            --entrypoint /opt/sbin/radiusd \
+            akfr:ci -XC -d /etc/raddb 2>&1 | tee radiusd.log
+          grep -q 'Configuration appears to be OK' radiusd.log
+          ! grep -qiE 'no longer necessary|Failed resolving' radiusd.log
+
+  e2e:
+    #  The behavioural gate. Catches faults radiusd -XC cannot see.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run the end-to-end suite
+        run: ./test/e2e/run.sh
+
+  build:
+    needs: [lint, validate, e2e]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v4
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
