@@ -1,0 +1,67 @@
+#  Deployable stack for WPA2/3-Enterprise authentication against authentik.
+#
+#  UniFi AP --EAP-TTLS--> freeradius --inner PAP--> authentik_radius --> authentik
+#
+#  Deployed as a Portainer git-backed stack: set the variables from
+#  .env.example in Portainer's stack environment section.
+#
+#  No "version:" key -- it is obsolete in Compose v2 and only emits a warning.
+
+services:
+  authentik_radius:
+    image: ghcr.io/goauthentik/radius:${AUTHENTIK_VERSION:?set AUTHENTIK_VERSION to match your authentik server}
+    restart: unless-stopped
+    environment:
+      AUTHENTIK_HOST: ${AUTHENTIK_HOST:?set AUTHENTIK_HOST}
+      AUTHENTIK_TOKEN: ${AUTHENTIK_TOKEN:?set AUTHENTIK_TOKEN}
+      AUTHENTIK_INSECURE: ${AUTHENTIK_INSECURE:-false}
+      AUTHENTIK_LISTEN__METRICS: 0.0.0.0:9300
+    #  No healthcheck override. The image already ships
+    #  HEALTHCHECK ["CMD","/radius","healthcheck"] with a 5s interval and 20
+    #  retries, maintained upstream. Verified: it exits 1 while the outpost
+    #  cannot reach authentik and its metrics port is closed, which is exactly
+    #  the condition depends_on must wait through.
+    networks: [radius]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  freeradius:
+    image: ghcr.io/wus-technik/authentik-freeradius:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      authentik_radius:
+        condition: service_healthy
+    environment:
+      AUTHENTIK_RADIUS_HOST: authentik_radius
+      AUTHENTIK_RADIUS_SECRET: ${AUTHENTIK_RADIUS_SECRET:?set AUTHENTIK_RADIUS_SECRET}
+      RADIUS_SECRET: ${RADIUS_SECRET:?set RADIUS_SECRET}
+      RADIUS_CLIENT_NET: ${RADIUS_CLIENT_NET:?set RADIUS_CLIENT_NET to your AP subnet}
+      TLS_CERT_PATH: ${TLS_CERT_PATH:?set TLS_CERT_PATH}
+      TLS_KEY_PATH: ${TLS_KEY_PATH:?set TLS_KEY_PATH}
+      CERT_RELOAD_WATCH: ${CERT_RELOAD_WATCH:-false}
+      CERT_RELOAD_INTERVAL: ${CERT_RELOAD_INTERVAL:-3600}
+      FREERADIUS_ENABLE_DEBUG: ${FREERADIUS_ENABLE_DEBUG:-false}
+    volumes:
+      #  The whole tree, read-only. certbot repoints live/ symlinks at new
+      #  archive/ files, so mounting the individual pem files pins the old
+      #  inode and the container serves a stale certificate forever.
+      - ${LETSENCRYPT_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro
+    ports:
+      - "${RADIUS_LISTEN_ADDR:-0.0.0.0}:1812:1812/udp"
+    read_only: true
+    #  /var/run is a symlink to ../run in the Alpine image, so radiusd's
+    #  run_dir = /var/run/radiusd resolves to /run/radiusd. Verified: these two
+    #  tmpfs mounts are sufficient and a third on /var/run is redundant.
+    tmpfs:
+      - /run/radiusd
+      - /tmp/radiusd
+    cap_drop: [ALL]
+    networks: [radius]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+networks:
+  radius:
+    driver: bridge

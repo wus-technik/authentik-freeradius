@@ -1,0 +1,9 @@
+#  Local development: build the image from source instead of pulling it.
+#  Copy to docker-compose.override.yml (gitignored); Compose merges it
+#  automatically.
+services:
+  freeradius:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: authentik-freeradius:dev
