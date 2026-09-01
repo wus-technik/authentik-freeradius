@@ -27,9 +27,9 @@ services:
         condition: service_started
     environment:
       AUTHENTIK_RADIUS_HOST: authentik_radius
-      AUTHENTIK_RADIUS_SECRET: backendsecret
-      RADIUS_SECRET: uplinksecret
-      RADIUS_CLIENT_NET: 0.0.0.0/0
+      AUTHENTIK_RADIUS_SECRET: e2e-backend-secret-not-a-real-one
+      RADIUS_SECRET: e2e-uplink-secret-not-a-real-one
+      RADIUS_CLIENT_NET: 172.28.0.0/16
       TLS_CERT_PATH: /certs/server.crt
       TLS_KEY_PATH: /certs/server.key
     volumes:
@@ -46,10 +46,13 @@ services:
   client:
     build: ./client
     environment:
-      RADIUS_SECRET: uplinksecret
+      RADIUS_SECRET: e2e-uplink-secret-not-a-real-one
     networks: [e2e]
     entrypoint: ["/auth.sh"]
 
 networks:
   e2e:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

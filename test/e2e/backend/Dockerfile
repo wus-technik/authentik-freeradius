@@ -6,7 +6,7 @@
 # outpost never would, and the regression test in run.sh becomes meaningless.
 FROM freeradius/freeradius-server:3.2.10-alpine
 
-RUN printf '\nclient proxy {\n\tipaddr = 0.0.0.0/0\n\tsecret = "backendsecret"\n\trequire_message_authenticator = no\n}\n' \
+RUN printf '\nclient proxy {\n\tipaddr = 0.0.0.0/0\n\tsecret = "e2e-backend-secret-not-a-real-one"\n\trequire_message_authenticator = no\n}\n' \
       >> /etc/raddb/clients.conf \
  && sed -i '1i testuser Cleartext-Password := "testpw"' /etc/raddb/mods-config/files/authorize \
  && sed -i 's/^\([[:space:]]*\)status_server = yes/\1status_server = no/' /etc/raddb/radiusd.conf \

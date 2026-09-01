@@ -10,7 +10,7 @@ if [ -z "$ip" ]; then
 fi
 
 # eapol_test -a requires an IP address, not a hostname.
-eapol_test -c /ttls.conf -a "$ip" -p 1812 -s "${RADIUS_SECRET:-uplinksecret}" -r0 >/tmp/eapol.log 2>&1
+eapol_test -c /ttls.conf -a "$ip" -p 1812 -s "${RADIUS_SECRET:-e2e-uplink-secret-not-a-real-one}" -r0 >/tmp/eapol.log 2>&1
 rc=$?
 tail -1 /tmp/eapol.log
 exit "$rc"

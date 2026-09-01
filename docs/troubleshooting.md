@@ -16,8 +16,10 @@ exercises the actual EAP path.
 ```bash
 docker compose exec freeradius sh -c \
   'printf "User-Name=%s\nUser-Password=%s\n" someuser somepass | \
-   /opt/bin/radclient -x authentik_radius:1812 auth "$AUTHENTIK_RADIUS_SECRET"'
+   /opt/bin/radclient authentik_radius:1812 auth "$AUTHENTIK_RADIUS_SECRET"'
 ```
+
+Use a disposable test account here, not a real user's credentials - `radclient` output and shell history are not a safe place for a live password.
 
 Access-Accept means authentik and the outpost are fine and the problem is in the EAP half.
 

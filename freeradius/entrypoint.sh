@@ -19,6 +19,24 @@ for var in RADIUS_SECRET AUTHENTIK_RADIUS_SECRET RADIUS_CLIENT_NET AUTHENTIK_RAD
 	[ -n "$value" ] || die "required environment variable $var is unset or empty"
 done
 
+case "$RADIUS_CLIENT_NET" in
+	0.0.0.0/0|::/0)
+		die "RADIUS_CLIENT_NET must not be $RADIUS_CLIENT_NET - scope it to the AP/controller subnet"
+		;;
+esac
+
+for var in RADIUS_SECRET AUTHENTIK_RADIUS_SECRET; do
+	eval "value=\${$var}"
+	case "$value" in
+		CHANGEME*)
+			die "$var still holds the placeholder from .env.example - generate one with: openssl rand -hex 32"
+			;;
+	esac
+	if [ "${#value}" -lt 16 ]; then
+		die "$var must be at least 16 characters (got ${#value})"
+	fi
+done
+
 CERT_FILE="${TLS_CERT_PATH:-/etc/raddb/certs/server.crt}"
 KEY_FILE="${TLS_KEY_PATH:-/etc/raddb/certs/server.key}"
 export TLS_CERT_PATH="$CERT_FILE"
