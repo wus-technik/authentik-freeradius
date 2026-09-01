@@ -1,1 +1,5 @@
-docker-compose.yml
+# The stack file is the deployable artifact and MUST be committed.
+# Operator-specific values belong in .env or Portainer stack variables.
+.env
+docker-compose.override.yml
+test/e2e/certs/
