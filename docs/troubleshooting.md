@@ -2,6 +2,33 @@
 
 Work from the outside in: supplicant → AP → FreeRADIUS → outpost → authentik.
 
+## Which log is the witness
+
+Before reading any log, know what it can and cannot prove.
+
+**FreeRADIUS logs nothing in normal operation.** `log { auth }` is off, so a successful
+— or even an attempted — authentication leaves no trace. **An empty FreeRADIUS log is not
+evidence that no request arrived.** Only errors and startup messages appear there.
+
+**The outpost log is the witness.** Every request FreeRADIUS proxies inward shows up as a
+`Radius Request` line. That splits the chain in two:
+
+| Outpost log | Where the fault is |
+|---|---|
+| no `Radius Request` | the **outer** leg — supplicant, AP, or the EAP-TTLS tunnel to FreeRADIUS |
+| `Radius Request` present, then a reject or flow error | the **inner** leg — outpost, provider binding, authentik flow, or the user's credentials |
+
+```bash
+docker compose logs -f authentik_radius | grep -i 'radius request'
+```
+
+**Do not use the controller's event log as a witness.** On UniFi the `stat/event`
+endpoint can return an empty list permanently for a site, regardless of what the APs are
+doing. Its silence means nothing.
+
+If you need FreeRADIUS itself to speak up, turn on debug logging (see below) — but note
+that it prints cleartext passwords, so it is a deliberate, temporary step, not a default.
+
 ## Test the whole chain without a WiFi client
 
 `eapol_test` (from `wpa_supplicant`) drives a real EAP-TTLS exchange. Unlike `radtest`, it
@@ -21,6 +48,9 @@ docker compose exec freeradius sh -c \
 
 Use a disposable test account here, not a real user's credentials - `radclient` output and shell history are not a safe place for a live password.
 
+`radclient` is **not on `PATH`** in this image — it lives at `/opt/bin/radclient`, and a
+bare `radclient` call fails with `not found`.
+
 Access-Accept means authentik and the outpost are fine and the problem is in the EAP half.
 
 ## Symptoms
@@ -33,6 +63,11 @@ Access-Accept means authentik and the outpost are fine and the problem is in the
 
 **`No provider found` with `hashed_secret` in the outpost log** — `AUTHENTIK_RADIUS_SECRET`
 does not match the shared secret on authentik's RADIUS provider.
+
+**The `freeradius` container sits in `created` and never starts, right after a deploy** —
+see the deploy note in the [README](../README.md#quickstart-portainer-git-backed-stack).
+`depends_on: condition: service_healthy` outruns the orchestrator: redeploy the identical
+stack a second time. Starting the container through the Docker API alone does not work.
 
 **Client connects then immediately drops** — usually certificate trust. Check the client
 trusts the issuing CA and that the configured server name matches the certificate CN.
@@ -47,6 +82,15 @@ docker compose logs freeradius | grep -iE 'zombie|dead|alive'
 ```
 
 `Marking home server ... as dead.` with no later `alive again` is this fault.
+
+**Authentication stopped after the outpost alone was recreated** — an authentik version
+bump, an image update, or `docker compose up -d authentik_radius` replaces that container
+and Docker gives it a new bridge address. FreeRADIUS resolved `AUTHENTIK_RADIUS_HOST`
+**once at startup** and keeps proxying to the old one, with no revive path. Restart the
+`freeradius` container as well. A full stack redeploy hides the fault, which is why it
+surfaces months later rather than in testing — tracked as
+[#5](https://github.com/wus-technik/authentik-freeradius/issues/5). Until it is fixed,
+treat "restart the outpost" as "restart the stack".
 
 **Authentication stopped working weeks after deployment** — the certificate was renewed and
 the container is still serving the old one. Set `CERT_RELOAD_WATCH=true`, and confirm

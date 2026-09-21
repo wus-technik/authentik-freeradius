@@ -53,6 +53,21 @@ for development only.
 
 Certificate renewals need `CERT_RELOAD_WATCH=true`: FreeRADIUS reads TLS material once at
 startup, so without it the container serves the old certificate until someone restarts it.
+[docs/certificates.md](docs/certificates.md) has a worked rollout that keeps renewals
+hands-off.
+
+### Deploy the stack twice
+
+`freeradius` waits for the outpost via `depends_on: condition: service_healthy`, and the
+outpost needs **roughly 25 seconds** to become healthy — it first waits for the authentik
+server, logging `503 ... retrying` while it does. Portainer returns before that, and
+**`freeradius` is left sitting in `created` and never starts.**
+
+Redeploy the identical stack a second time and it comes up. Starting the container through
+the Docker API (Portainer's `POST /containers/<id>/start`) does **not** work.
+
+A container list taken immediately after a deploy shows everything as `created`. That is
+the start in progress, not a failure — look again once the outpost reports healthy.
 
 ## Documentation
 
@@ -60,6 +75,8 @@ startup, so without it the container serves the old certificate until someone re
 - [docs/unifi.md](docs/unifi.md) — RADIUS profile and SSID
 - [docs/clients.md](docs/clients.md) — Windows, Android, iOS, Linux
 - [docs/troubleshooting.md](docs/troubleshooting.md) — when it does not work
+- [docs/certificates.md](docs/certificates.md) — issuing and rotating the server certificate
+- [docs/migration.md](docs/migration.md) — replacing an existing PEAP/MSCHAPv2 RADIUS
 - [docs/monitoring.md](docs/monitoring.md) — Zabbix integration
 
 ## Development

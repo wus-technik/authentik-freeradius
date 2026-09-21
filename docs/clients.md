@@ -35,9 +35,25 @@ for a fleet.
 
 ## iOS / macOS
 
-iOS has no EAP-TTLS/PAP option in the manual UI. Deploy a `.mobileconfig` profile with
-Apple Configurator or your MDM, setting EAP-TTLS, inner authentication PAP, and the trusted
-certificate and server name.
+iOS has **no EAP-TTLS/PAP option in the manual UI at all** — a device configured by hand
+never sends a RADIUS request, so an empty server log during an iPhone test proves nothing
+about the server. Deploy a `.mobileconfig` profile with Apple Configurator or your MDM.
+
+[`eap-ttls-pap.mobileconfig.example`](eap-ttls-pap.mobileconfig.example) in this directory
+is a working starting point. The parts that carry the security:
+
+| Key | Value | Why |
+|---|---|---|
+| `AcceptEAPTypes` | `[21]` | EAP-TTLS |
+| `TTLSInnerAuthentication` | `PAP` | the only inner method the outpost supports |
+| `TLSTrustedServerNames` | the certificate CN | without it, any valid certificate is accepted |
+| `TLSAllowTrustExceptions` | `false` | without it, the user can tap past a wrong certificate |
+
+The last two are not optional. Omit them and the profile hands a cleartext password to the
+first impostor AP that asks.
+
+When you need a quick end-to-end proof that the server works, reach for an **Android**
+device rather than an iPhone — Android 11+ configures TTLS/PAP from the normal UI.
 
 ## Linux (NetworkManager)
 

@@ -28,6 +28,12 @@ Do not enable **RADIUS Assigned VLAN** — dynamic VLAN is not implemented yet.
 WPA3-Enterprise requires Protected Management Frames and is not supported by older clients.
 Start with WPA2 Enterprise, confirm it works, then move up.
 
+**An SSID does not pin the EAP method.** The controller configures WPA-Enterprise and a
+RADIUS profile, nothing more; which EAP type runs is negotiated between the supplicant and
+FreeRADIUS. One SSID can therefore carry an EAP-TTLS/PAP rollout and an EAP-TLS pilot at
+the same time, and moving a device between them is a client-side profile change with
+nothing to do on the controller.
+
 ## Firewall
 
 The APs must reach the Docker host on **UDP 1812**. `RADIUS_CLIENT_NET` must cover the AP

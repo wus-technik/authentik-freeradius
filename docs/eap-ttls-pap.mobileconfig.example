@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Example iOS/macOS WiFi profile for this stack: EAP-TTLS with inner PAP.
+
+  iOS offers no EAP-TTLS/PAP option in the manual UI, so a profile is the only way.
+
+  Replace, in every place they occur:
+    YOUR-SSID                 the SSID
+    radius.example.com        the RADIUS server certificate's CN
+    com.example.wifi.ttls     your own reverse-DNS identifier
+    the two PayloadUUIDs      fresh ones from `uuidgen`
+
+  TLSTrustedServerNames and TLSAllowTrustExceptions are NOT optional. Without them the
+  device accepts any valid certificate and hands the user's cleartext password to the
+  first impostor access point that asks, which is the whole attack EAP-TTLS/PAP invites.
+
+  Sign the profile before distributing it (`security cms -S`) or push it through MDM;
+  an unsigned profile shows as "Unverified" and teaches users to tap through that warning.
+-->
+<plist version="1.0">
+<dict>
+  <key>PayloadType</key>          <string>Configuration</string>
+  <key>PayloadVersion</key>       <integer>1</integer>
+  <key>PayloadIdentifier</key>    <string>com.example.wifi.ttls</string>
+  <key>PayloadUUID</key>          <string>REPLACE-WITH-UUIDGEN-0001</string>
+  <key>PayloadDisplayName</key>   <string>WiFi (EAP-TTLS)</string>
+  <key>PayloadRemovalDisallowed</key> <false/>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key>       <string>com.apple.wifi.managed</string>
+      <key>PayloadVersion</key>    <integer>1</integer>
+      <key>PayloadIdentifier</key> <string>com.example.wifi.ttls.network</string>
+      <key>PayloadUUID</key>       <string>REPLACE-WITH-UUIDGEN-0002</string>
+      <key>PayloadDisplayName</key><string>YOUR-SSID</string>
+
+      <key>SSID_STR</key>          <string>YOUR-SSID</string>
+      <key>AutoJoin</key>          <true/>
+      <key>EncryptionType</key>    <string>WPA2</string>
+
+      <key>EAPClientConfiguration</key>
+      <dict>
+        <!-- 21 = EAP-TTLS -->
+        <key>AcceptEAPTypes</key>
+        <array><integer>21</integer></array>
+        <key>TTLSInnerAuthentication</key>  <string>PAP</string>
+
+        <!-- Do not reveal the real username outside the tunnel. -->
+        <key>OuterIdentity</key>            <string>anonymous</string>
+
+        <!-- Pin the server name. Without this, any valid certificate is accepted. -->
+        <key>TLSTrustedServerNames</key>
+        <array><string>radius.example.com</string></array>
+        <!-- Do not let the user tap past an unexpected certificate. -->
+        <key>TLSAllowTrustExceptions</key>  <false/>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>
