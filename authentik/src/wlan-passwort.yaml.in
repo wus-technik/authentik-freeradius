@@ -14,6 +14,8 @@ context:
   ldap_search_group: wlan-ldap-search
   ssid: WLAN
   radius_server_name: radius.example.com
+  # authentik accepts only an absolute launch URL for the portal tile.
+  authentik_url: https://authentik.example.com
   ldap_base_dn: dc=ldap,dc=goauthentik,dc=io
 entries:
   # Groups are only created, never changed: an existing WLAN group keeps its
@@ -111,7 +113,9 @@ entries:
       slug: wlan-zugang
     attrs:
       name: WLAN-Zugang
-      meta_launch_url: /if/flow/wlan-passwort/
+      meta_launch_url: !Format
+        - "%s/if/flow/wlan-passwort/"
+        - !Context authentik_url
   - model: authentik_policies.policybinding
     identifiers:
       target: !KeyOf app-wlan

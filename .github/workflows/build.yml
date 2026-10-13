@@ -36,7 +36,8 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
           shellcheck freeradius/entrypoint.sh freeradius/healthcheck.sh \
-                     test/e2e/client/auth.sh test/e2e/run.sh
+                     test/e2e/client/auth.sh test/e2e/run.sh \
+                     test/authentik/run.sh
 
       - name: Check the Compose files
         run: |

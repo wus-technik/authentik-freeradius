@@ -1,0 +1,24 @@
+name: authentik-integration
+
+#  Against a real authentik: blueprint import, the WiFi password flow, the LDAP
+#  outpost and PEAP. Run before a release and after every authentik update.
+on:
+  workflow_dispatch:
+    inputs:
+      authentik_version:
+        description: authentik version to test against
+        required: true
+        default: "2026.8.3"
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run the authentik integration test
+        run: ./test/authentik/run.sh
+        env:
+          AUTHENTIK_VERSION: ${{ inputs.authentik_version }}

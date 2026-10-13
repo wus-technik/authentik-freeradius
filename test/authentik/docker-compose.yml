@@ -1,0 +1,91 @@
+#  Integration test against a real authentik (spec 8.3). Not part of the
+#  normal CI run; see .github/workflows/authentik-integration.yml.
+name: akfr-it
+
+x-authentik: &authentik
+  image: ghcr.io/goauthentik/server:${AUTHENTIK_VERSION:-2026.8.3}
+  environment:
+    AUTHENTIK_SECRET_KEY: it-secret-key-not-a-real-one-0123456789abcdef
+    AUTHENTIK_POSTGRESQL__HOST: postgresql
+    AUTHENTIK_POSTGRESQL__USER: authentik
+    AUTHENTIK_POSTGRESQL__NAME: authentik
+    AUTHENTIK_POSTGRESQL__PASSWORD: it-db-not-a-real-one
+    AUTHENTIK_BOOTSTRAP_PASSWORD: it-admin-not-a-real-one
+    AUTHENTIK_BOOTSTRAP_TOKEN: it-bootstrap-token-not-a-real-one
+    AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+    AUTHENTIK_DISABLE_UPDATE_CHECK: "true"
+  depends_on:
+    postgresql: {condition: service_healthy}
+  networks: [it]
+
+services:
+  postgresql:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: it-db-not-a-real-one
+      POSTGRES_USER: authentik
+      POSTGRES_DB: authentik
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U authentik"], interval: 5s, retries: 20}
+    networks: [it]
+
+  server:
+    <<: *authentik
+    command: server
+    ports: ["127.0.0.1:19000:9000"]
+
+  worker:
+    <<: *authentik
+    command: worker
+
+  authentik_ldap:
+    image: ghcr.io/goauthentik/ldap:${AUTHENTIK_VERSION:-2026.8.3}
+    environment:
+      AUTHENTIK_HOST: http://server:9000
+      AUTHENTIK_INSECURE: "true"
+      AUTHENTIK_TOKEN: ${IT_LDAP_TOKEN:-unset}
+    networks:
+      it:
+        ipv4_address: 172.29.0.11
+
+  certgen:
+    build: ../e2e/client
+    volumes: ["./.state:/out"]
+    command: ["sh", "-c", "test -f /out/server.crt || openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj '/CN=radius.it.test' -keyout /out/server.key -out /out/server.crt"]
+    networks: [it]
+
+  freeradius:
+    build: {context: ../.., dockerfile: Dockerfile}
+    environment:
+      #  No RADIUS outpost in this test; the address only has to be valid.
+      AUTHENTIK_RADIUS_HOST: 172.29.0.10
+      AUTHENTIK_RADIUS_SECRET: it-backend-secret-not-a-real-one
+      RADIUS_SECRET: e2e-uplink-secret-not-a-real-one
+      RADIUS_CLIENT_NET: 172.29.0.0/16
+      TLS_CERT_PATH: /certs/server.crt
+      TLS_KEY_PATH: /certs/server.key
+      PEAP_ENABLE: "true"
+      LDAP_HOST: 172.29.0.11
+      LDAP_BASE_DN: dc=ldap,dc=goauthentik,dc=io
+      LDAP_BIND_DN: cn=svc-wlan-ldap,ou=users,dc=ldap,dc=goauthentik,dc=io
+      LDAP_BIND_PASSWORD: ${IT_LDAP_BIND_PASSWORD:-unset}
+      LDAP_WLAN_GROUP_DN: cn=wlan,ou=groups,dc=ldap,dc=goauthentik,dc=io
+    volumes: ["./.state:/certs:ro"]
+    read_only: true
+    tmpfs: [/run/radiusd, /tmp/radiusd]
+    cap_drop: [ALL]
+    networks: [it]
+
+  client:
+    build: ../e2e/client
+    environment:
+      RADIUS_SECRET: e2e-uplink-secret-not-a-real-one
+    entrypoint: ["/auth.sh"]
+    networks: [it]
+
+networks:
+  it:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/16
+          ip_range: 172.29.128.0/17
