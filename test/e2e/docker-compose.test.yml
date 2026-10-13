@@ -32,6 +32,7 @@ services:
       RADIUS_CLIENT_NET: 172.28.0.0/16
       TLS_CERT_PATH: /certs/server.crt
       TLS_KEY_PATH: /certs/server.key
+      OUTPOST_RESOLVE_INTERVAL: 5
     volumes:
       - ./certs:/certs:ro
     networks: [e2e]
@@ -42,6 +43,8 @@ services:
       - /run/radiusd
       - /tmp/radiusd
     cap_drop: [ALL]
+    # The address watcher ends radiusd and relies on this to bring it back.
+    restart: unless-stopped
 
   client:
     build: ./client

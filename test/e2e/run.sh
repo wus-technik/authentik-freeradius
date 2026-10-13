@@ -14,7 +14,7 @@ cd "$(dirname "$0")"
 COMPOSE=(docker compose -f docker-compose.test.yml)
 REVIVE_WAIT="${REVIVE_WAIT:-75}"
 
-cleanup() { "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true; }
+cleanup() { docker rm -f akfr-e2e-squatter >/dev/null 2>&1 || true; "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -29,11 +29,11 @@ echo "== starting stack =="
 "${COMPOSE[@]}" up -d authentik_radius freeradius
 sleep 10
 
-echo "== 1/4 baseline authentication =="
+echo "== 1/5 baseline authentication =="
 auth || fail "baseline EAP-TTLS authentication did not succeed"
 echo "   ok"
 
-echo "== 2/4 outage: stopping the outpost =="
+echo "== 2/5 outage: stopping the outpost =="
 "${COMPOSE[@]}" stop authentik_radius >/dev/null
 
 # The home server must actually reach the "dead" state before recovery is
@@ -54,7 +54,7 @@ echo "   home server is dead, as required"
 if auth; then fail "authentication succeeded while the outpost was stopped"; fi
 echo "   ok (correctly failing)"
 
-echo "== 3/4 recovery: restarting the outpost =="
+echo "== 3/5 recovery: restarting the outpost =="
 "${COMPOSE[@]}" start authentik_radius >/dev/null
 sleep "$REVIVE_WAIT"
 if ! auth; then
@@ -66,10 +66,47 @@ it can never revive, because the authentik outpost does not answer Status-Server
 fi
 echo "   ok"
 
-echo "== 4/4 container healthcheck =="
+echo "== 4/5 outpost recreated alone, on a new address =="
+# Stage 3 restarts the stand-in in place, so it keeps its address. An image
+# update does not: the container is replaced and Docker hands out a new one,
+# while radiusd still holds the address it resolved at startup (issue #5).
+outpost_ip() {
+	docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 		"$("${COMPOSE[@]}" ps -q authentik_radius)"
+}
+old_ip="$(outpost_ip)"
+"${COMPOSE[@]}" rm -sf authentik_radius >/dev/null 2>&1
+# Docker reuses the lowest free address, so the replacement would get the old
+# one back and the test would prove nothing. Park a container on it first.
+"${COMPOSE[@]}" run -d --rm --name akfr-e2e-squatter --entrypoint sleep client 600 >/dev/null 2>&1
+"${COMPOSE[@]}" up -d --no-deps authentik_radius >/dev/null 2>&1
+new_ip="$(outpost_ip)"
+[ -n "$new_ip" ] && [ "$new_ip" != "$old_ip" ] || fail "the outpost kept its address ($old_ip); the recreate test cannot prove anything"
+echo "   outpost moved from $old_ip to $new_ip"
+
+deadline=$(( $(date +%s) + 90 ))
+until auth; do
+	if [ "$(date +%s)" -ge "$deadline" ]; then
+		echo "--- freeradius log ---" >&2
+		"${COMPOSE[@]}" logs --tail 20 freeradius >&2 || true
+		fail "authentication did not recover within 90s after the outpost was recreated on a new address"
+	fi
+	sleep 5
+done
+docker rm -f akfr-e2e-squatter >/dev/null 2>&1 || true
+echo "   ok"
+
+echo "== 5/5 container healthcheck =="
 cid="$("${COMPOSE[@]}" ps -q freeradius)"
 [ -n "$cid" ] || fail "freeradius container is not running"
-health="$(docker inspect --format '{{.State.Health.Status}}' "$cid")"
+# Stage 4 restarted radiusd, so the container may still be inside its start
+# period. Wait for a verdict rather than reading "starting" as a failure.
+deadline=$(( $(date +%s) + 90 ))
+while :; do
+	health="$(docker inspect --format '{{.State.Health.Status}}' "$cid")"
+	[ "$health" = "starting" ] || break
+	[ "$(date +%s)" -lt "$deadline" ] || break
+	sleep 5
+done
 [ "$health" = "healthy" ] || fail "freeradius container health is '${health:-unknown}', expected 'healthy'"
 echo "   ok"
 

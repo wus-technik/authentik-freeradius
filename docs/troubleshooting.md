@@ -85,12 +85,18 @@ docker compose logs freeradius | grep -iE 'zombie|dead|alive'
 
 **Authentication stopped after the outpost alone was recreated** — an authentik version
 bump, an image update, or `docker compose up -d authentik_radius` replaces that container
-and Docker gives it a new bridge address. FreeRADIUS resolved `AUTHENTIK_RADIUS_HOST`
-**once at startup** and keeps proxying to the old one, with no revive path. Restart the
-`freeradius` container as well. A full stack redeploy hides the fault, which is why it
-surfaces months later rather than in testing — tracked as
-[#5](https://github.com/wus-technik/authentik-freeradius/issues/5). Until it is fixed,
-treat "restart the outpost" as "restart the stack".
+and Docker gives it a new bridge address. FreeRADIUS resolves the outpost **once at
+startup**, so the container checks the name every `OUTPOST_RESOLVE_INTERVAL` seconds
+(default 15) and restarts itself when the address has moved. Expect a short gap, then:
+
+```bash
+docker compose logs freeradius | grep 'outpost address changed'
+```
+
+If authentication stays down, check that the watcher is running at all: it logs
+`address watcher armed` at startup, it is off when `OUTPOST_RESOLVE_INTERVAL=0` or when
+`AUTHENTIK_RADIUS_HOST` is a literal address, and it depends on the `restart:` policy to
+bring the container back.
 
 **Authentication stopped working weeks after deployment** — the certificate was renewed and
 the container is still serving the old one. Set `CERT_RELOAD_WATCH=true`, and confirm

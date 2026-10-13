@@ -41,6 +41,7 @@ services:
       TLS_KEY_PATH: ${TLS_KEY_PATH:?set TLS_KEY_PATH}
       CERT_RELOAD_WATCH: ${CERT_RELOAD_WATCH:-false}
       CERT_RELOAD_INTERVAL: ${CERT_RELOAD_INTERVAL:-3600}
+      OUTPOST_RESOLVE_INTERVAL: ${OUTPOST_RESOLVE_INTERVAL:-15}
       FREERADIUS_ENABLE_DEBUG: ${FREERADIUS_ENABLE_DEBUG:-false}
     volumes:
       #  The whole tree, read-only. certbot repoints live/ symlinks at new
