@@ -43,9 +43,11 @@ rejects() {
 	shift
 	args=()
 	for kv in "$@"; do args+=(-e "$kv"); done
-	if out="$(timeout 60 "${COMPOSE[@]}" run --rm --no-deps "${args[@]}" freeradius 2>&1)"; then
-		fail "freeradius started with $*; expected it to refuse: $expect"
-	fi
+	rc=0
+	out="$(timeout 60 "${COMPOSE[@]}" run --rm --no-deps "${args[@]}" freeradius 2>&1)" || rc=$?
+	[ "$rc" -ne 0 ] || fail "freeradius started with $*; expected it to refuse: $expect"
+	[ "$rc" -ne 124 ] || fail "freeradius kept running for 60s with $*; it must refuse promptly: $expect"
+	[ "$rc" -le 128 ] || fail "freeradius was killed (exit $rc) with $*; it must refuse by itself: $expect"
 	printf '%s\n' "$out" | grep -qF "$expect" \
 		|| fail "freeradius refused $* without saying '$expect'. Output: $out"
 }
@@ -148,8 +150,8 @@ echo "   ok"
 echo "== container healthcheck =="
 cid="$("${COMPOSE[@]}" ps -q freeradius)"
 [ -n "$cid" ] || fail "freeradius container is not running"
-# Stage 4 restarted radiusd, so the container may still be inside its start
-# period. Wait for a verdict rather than reading "starting" as a failure.
+# The container may still be inside its start period, or unhealthy for a moment
+# after the outpost stages. Wait for a verdict rather than reading "starting" as a failure.
 deadline=$(( $(date +%s) + 90 ))
 while :; do
 	health="$(docker inspect --format '{{.State.Health.Status}}' "$cid")"
