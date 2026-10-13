@@ -70,3 +70,84 @@ Several mappings that each set `Filter-Id` overwrite one another in name order. 
 in more than one WiFi group, decide the precedence inside a single mapping.
 
 Verified against authentik 2026.8.3 with the real RADIUS outpost.
+
+## 6. WiFi password for PEAP (optional)
+
+PEAP-MSCHAPv2 lets every platform join with a username and password and no profile. It
+needs the NT hash of the password, which authentik does not keep, so users get a separate,
+generated **WiFi password** in the authentik portal. Their SSO password is not involved.
+
+### Import the blueprint
+
+**Customization → Blueprints → Import**, upload
+[`authentik/blueprints/wlan-passwort.yaml`](../authentik/blueprints/wlan-passwort.yaml).
+
+| Context key | Default | Meaning |
+|---|---|---|
+| `wlan_group` | `wlan` | who may get a WiFi password and join; created if missing, never changed |
+| `ssid` | `WLAN` | shown to the user |
+| `radius_server_name` | `radius.example.com` | the certificate name users must confirm |
+| `authentik_url` | `https://authentik.example.com` | absolute URL of your authentik, used for the launch URL of the portal tile (authentik rejects a relative one) |
+| `ldap_search_group` | `wlan-ldap-search` | who may bind to the LDAP provider |
+| `ldap_base_dn` | `dc=ldap,dc=goauthentik,dc=io` | base DN of the LDAP provider |
+
+It creates the flow `wlan-passwort`, the portal tile **WLAN-Zugang**, and the LDAP
+provider `wlan-ldap` with its own bind flow. Change the defaults by editing the context
+block before the import. Without `authentik_url` the tile points to `authentik.example.com`.
+
+### Service account, permission, outpost
+
+The blueprint does not create these:
+
+1. **Directory → Users → Create Service Account**:
+   - Name `svc-wlan-ldap`.
+   - Clear **Create group** and **Expiring**. An expired token switches PEAP off without
+     warning.
+2. Add `svc-wlan-ldap` to the group `wlan-ldap-search`.
+3. **Directory → Roles → Create**, name `wlan-ldap-search`. Then:
+   - Assign the role to the group `wlan-ldap-search`.
+   - On the provider `wlan-ldap` (**Permissions** tab), grant the role
+     **Search full LDAP directory**.
+4. **Applications → Outposts → Create**:
+   - Type **LDAP**, provider `wlan-ldap`, no service connection.
+   - Copy the token into `AUTHENTIK_LDAP_TOKEN`.
+5. **Directory → Tokens**, token `service-account-svc-wlan-ldap-password` → copy into
+   `LDAP_BIND_PASSWORD`.
+6. Deploy with [`docker-compose.peap.yml`](../docker-compose.peap.yml) as an additional
+   Compose file and set the `LDAP_*` variables from `.env.example`.
+
+The DNs in `LDAP_BASE_DN`, `LDAP_BIND_DN` and `LDAP_WLAN_GROUP_DN` must be 1-255 characters
+of `A-Z a-z 0-9 = , . _ -` and spaces. The container refuses to start otherwise
+(`<VAR> may only contain A-Z a-z 0-9 = , . _ - and spaces`); `+`, `#`, parentheses and
+non-ASCII characters are not accepted, so a group whose DN needs them must be renamed.
+
+**This provider hands out NT hashes.** Do not attach it to any other application, and keep
+the group `wlan-ldap-search` to the service account. Rotating the token: create a new one
+for `svc-wlan-ldap`, update `LDAP_BIND_PASSWORD`, redeploy, delete the old token.
+
+### What users and the helpdesk do
+
+- **Users:** open **WLAN-Zugang** in the portal, note the six-word password, confirm.
+  Getting a new one invalidates the old one on every device.
+- **Stale page:** submitting an outdated WiFi password page, for example a second tab after
+  a password was already saved, is refused with "Das WLAN-Passwort ist abgelaufen. Bitte
+  lade die Seite neu." Reloading the page shows a new password; nothing is saved from the
+  stale page.
+- **Helpdesk:** cannot see or set a WiFi password. Deleting the attribute
+  `wifi-password-nthash` on the user locks WiFi until the user fetches a new one.
+- **Leavers:** deactivating the user, or removing them from `wlan`, refuses the next
+  login. No cache is involved: the provider runs in `direct` mode.
+
+### Security
+
+- The NT hash is equivalent to the WiFi password: anyone with the authentik database, an
+  admin account or the service account token has WiFi access for every user — not their
+  SSO account.
+- Without a profile users confirm the server certificate by tapping. A fake access point
+  can record the exchange and recover the NT hash offline (about 2^56 DES operations).
+  Tell users the certificate name; managed devices should still get a profile.
+- The plaintext passphrase sits in the user's session until it is saved or the session
+  expires.
+- Only the `wlan-passwort` flow may write `wifi-password-nthash`. Do not add a prompt field
+  named `attributes.wifi-password-*` to any user-facing flow (enrollment, profile edit):
+  users could then set the hash to a value of their choosing and the guarantee is gone.

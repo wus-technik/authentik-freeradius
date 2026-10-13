@@ -23,6 +23,11 @@ UniFi AP ──EAP-TTLS (802.1X, RADIUS/UDP 1812)──▶ FreeRADIUS
                                           (plain PAP, RADIUS/UDP 1812)
 ```
 
+Optionally, with [`docker-compose.peap.yml`](docker-compose.peap.yml), FreeRADIUS also
+speaks **PEAP-MSCHAPv2**: no client profile on any platform, with a separate WiFi password
+that users generate in authentik and that FreeRADIUS checks via the authentik LDAP
+outpost. See [docs/authentik.md § 6](docs/authentik.md#6-wifi-password-for-peap-optional).
+
 ## Security properties — read before deploying
 
 This design is a workaround, and it has a real cost:
@@ -38,6 +43,9 @@ publish the outpost's RADIUS port, and use long random shared secrets
 - **Shared secrets are visible via container inspection.** They are passed as compose
   environment variables, so anyone with Docker socket or Portainer access can read them
   with `docker inspect` or Portainer's stack view.
+- **With PEAP, authentik stores an NT hash per user** (`wifi-password-nthash`). It is
+  equivalent to that user's WiFi password — not to their SSO password — and the LDAP
+  service account can read all of them.
 
 `FREERADIUS_ENABLE_DEBUG=true` logs the inner tunnel, cleartext passwords included. It is
 for development only.
@@ -80,6 +88,7 @@ the start in progress, not a failure — look again once the outpost reports hea
 - [docs/certificates.md](docs/certificates.md) — issuing and rotating the server certificate
 - [docs/migration.md](docs/migration.md) — replacing an existing PEAP/MSCHAPv2 RADIUS
 - [docs/monitoring.md](docs/monitoring.md) — Zabbix integration
+- [docs/rollout-mail.de.md](docs/rollout-mail.de.md) — template mail to users (German)
 
 ## Development
 

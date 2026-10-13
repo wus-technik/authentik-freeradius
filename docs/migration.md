@@ -4,13 +4,16 @@ Most WPA-Enterprise deployments this stack replaces look the same: FreeRADIUS (o
 Synology *RADIUS Server* package, or NPS) doing **PEAP/MSCHAPv2 against Active Directory**,
 with the domain controller's own CA issuing the EAP server certificate.
 
-**This stack is not a drop-in for that.** The authentik outpost speaks PAP only, so the
-inner method changes to PAP inside EAP-TTLS, or to EAP-TLS with no password at all. Either
-way **every client needs a new profile**. Plan the rollout mechanism (Intune, GPO,
-`.mobileconfig`, NetworkManager) before the cutover, not after.
+**Two ways across, with different client cost:**
 
-If "no client changes" is a hard requirement, this stack is the wrong answer — that path
-runs through `ntlm_auth` against a Samba DC, keeping MSCHAPv2.
+- **PEAP-MSCHAPv2 with a WiFi password** ([authentik.md § 6](authentik.md#6-wifi-password-for-peap-optional)).
+  The inner method stays MSCHAPv2, so clients need no new profile — but every user needs a
+  new *password*: the generated WiFi password replaces the AD password for WiFi. Plan a
+  mail with the portal link (template: [rollout-mail.de.md](rollout-mail.de.md)) and keep
+  the old server running until users have switched. No AD, no `ntlm_auth`.
+- **EAP-TTLS/PAP or EAP-TLS.** The inner method changes, so **every client needs a new
+  profile**. Plan the rollout mechanism (Intune, GPO, `.mobileconfig`, NetworkManager)
+  before the cutover, not after.
 
 ## Survey the old server first
 
@@ -75,4 +78,6 @@ WiFi pass.
 - [ ] Group/flow binding in authentik agreed against the old server's (absent) user filter.
 - [ ] One real client of each platform authenticated against the new stack **before**
       the old server is touched.
+- [ ] With PEAP: users told, WiFi passwords fetched, one device per platform (Windows,
+      iOS, macOS, Android) joined without a profile.
 - [ ] Old server left running and reachable until the new one has carried production load.

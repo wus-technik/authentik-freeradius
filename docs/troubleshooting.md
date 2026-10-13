@@ -107,6 +107,22 @@ the container is still serving the old one. Set `CERT_RELOAD_WATCH=true`, and co
 `LETSENCRYPT_DIR` mounts the whole tree rather than individual `.pem` files: certbot
 repoints the `live/` symlinks, so a file mount pins the old inode.
 
+**PEAP login refused, `peap: no active WLAN user with a WiFi password: <user>`** — the
+directory had no match: the user is deactivated, not in the WLAN group, has no WiFi
+password yet, or typed a different username. EAP-TTLS is unaffected.
+
+**PEAP refused, `rlm_ldap … failed: Can't contact LDAP server`** — the LDAP outpost is
+down or not at `AUTHENTIK_LDAP_IP`. PEAP fails within seconds; EAP-TTLS keeps working. The
+connection pool reconnects by itself once the outpost is back.
+
+**PEAP refused, `rlm_ldap … failed: Invalid credentials`** — `LDAP_BIND_PASSWORD` is not a
+valid token of `svc-wlan-ldap`, or the token expired.
+
+**`<VAR> may only contain A-Z a-z 0-9 = , . _ - and spaces`** — one of `LDAP_BASE_DN`,
+`LDAP_BIND_DN`, `LDAP_WLAN_GROUP_DN` has a character outside that set (`+`, `#`,
+parentheses, non-ASCII) or is longer than 255 characters. Rename the group or user so its
+DN avoids them.
+
 ## Debug logging
 
 ```bash

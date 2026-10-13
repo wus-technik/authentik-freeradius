@@ -248,6 +248,9 @@ The patterns worth alerting on come straight from [troubleshooting.md](troublesh
 | `Ignoring request .* from unknown client` | AP outside `RADIUS_CLIENT_NET` | Warning |
 | `entrypoint: ` | startup validation failed; the container is about to exit | High |
 | `certificate changed, restarting radiusd` | informational — confirms the renewal watcher fired | Information |
+| `rlm_ldap .* failed: Invalid credentials` | PEAP service account token wrong or expired; every PEAP login fails | High |
+| `rlm_ldap .* failed: Can't contact LDAP server` | LDAP outpost down; PEAP fails, EAP-TTLS unaffected | High |
+| `peap: no active WLAN user with a WiFi password` | a refused PEAP login; many in a short time point at a rollout gap | Information |
 
 The first deserves the highest severity in the set: it is unrecoverable without a restart.
 

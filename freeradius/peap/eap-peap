@@ -2,8 +2,11 @@
 peap {
 	tls = tls-common
 	default_eap_type = mschapv2
-	#  Nothing from inside the tunnel reaches the access point: no
-	#  MS-CHAP2-Success, no attribute an inner module might add.
+	#  Nothing from inside the tunnel reaches the access point:
+	#  use_tunneled_reply = no keeps the inner reply attributes, notably the
+	#  inner User-Name, inside the tunnel. The outer Accept carries the outer
+	#  "anonymous" identity, not the real user. (eap_mschapv2 itself already
+	#  strips MS-CHAP2-Success.)
 	copy_request_to_tunnel = no
 	use_tunneled_reply = no
 	proxy_tunneled_request_as_eap = no

@@ -1,6 +1,25 @@
 # Client configuration
 
-All clients use **EAP-TTLS** with **PAP** as the inner method.
+All clients use **EAP-TTLS** with **PAP** as the inner method, except the profile-free PEAP option below.
+
+## PEAP without a profile (WiFi password)
+
+With `docker-compose.peap.yml` deployed, every platform joins from its normal WiFi dialog.
+Username: the authentik username. Password: the WiFi password from the portal tile
+**WLAN-Zugang** (see [authentik.md § 6](authentik.md#6-wifi-password-for-peap-optional)),
+**not** the SSO password.
+
+| Platform | Steps |
+|---|---|
+| Windows 10/11 | Pick the SSID, enter username and WiFi password, click **Connect** when it asks about the server — after checking the certificate name under **Show certificate details**. |
+| iOS / iPadOS | Pick the SSID, enter username and password, tap **Trust** after checking the certificate name. |
+| macOS | As iOS; macOS may ask for the login password to store the certificate trust. |
+| Android 11+ | EAP method **PEAP**, phase 2 **MSCHAPV2**, CA certificate **Use system certificates**, domain = the RADIUS server name, identity = username, anonymous identity empty. |
+
+The certificate name to confirm is shown on the WiFi password page. A different name means
+a different network: do not connect.
+
+Verified on real devices: pending, see the checklist in [migration.md](migration.md).
 
 ## The certificate trust problem
 
