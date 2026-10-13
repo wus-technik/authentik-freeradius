@@ -1,7 +1,7 @@
 # Design: PEAP-MSCHAPv2 mit eigenem, generiertem WLAN-Passwort aus authentik
 
 Datum: 2026-10-13
-Status: Revision 4, Entscheidungen vollständig, bereit für den Implementierungsplan
+Status: Revision 5, umgesetzt; Gerätetests (§ 8.4) stehen noch aus
 Issues: #14 (Spike-Ergebnis dort), #15 (feste Adressen). Bezug: #11, #7/#12 (für dieses Ziel zurückgestellt), #8
 
 ## 1. Ziel
@@ -70,8 +70,8 @@ Ein Blueprint `authentik/blueprints/wlan-passwort.yaml` liefert Flow, Prompts, P
 Anwendung, Gruppen, Bind-Flow und LDAP-Provider. Von Hand angelegt werden das Servicekonto,
 seine Suchberechtigung und der LDAP-Outpost; die Doku beschreibt die Schritte. Der Blueprint
 entsteht aus Quelldateien unter `authentik/src/`, damit die Expressions testbar sind.
-Die Werte, die pro Installation abweichen (Gruppenname, Servername des Zertifikats, SSID),
-kommen als Blueprint-Kontext; Standardwerte stehen in § 12.
+Die Werte, die pro Installation abweichen (Gruppenname, Servername des Zertifikats, SSID,
+authentik-URL, Base-DN), kommen als Blueprint-Kontext; Standardwerte stehen in § 12.
 
 ### 5.1 Flow „WLAN-Passwort“
 
@@ -87,7 +87,7 @@ manipulierter POST kann kein selbst gewähltes Passwort setzen.
 Ablauf:
 
 1. **Erzeugen.** Die `initial_value_expression` des Felds `wifi_password` erzeugt die
-   Passphrase und legt sie in der **Session** unter `wifi_password_pending` ab, zusammen mit
+   Passphrase **nur beim Rendern (GET)** und legt sie in der **Session** unter `wifi_password_pending` ab, zusammen mit
    dem aktuellen `wifi-password-set-at` des Nutzers als `base`. Steht dort schon ein Wert mit
    derselben `base`, gibt sie diesen zurück. Unterscheidet sich `base`, ist das Passwort
    inzwischen gespeichert worden, und sie erzeugt ein neues. Geprüft (V1):
@@ -96,6 +96,9 @@ Ablauf:
    - Ein Schreiben in `prompt_context` überlebt den Request nicht: Jedes Rendern lieferte
      einen anderen Wert.
    - Der Session-Wert bleibt über erneutes Rendern und Absenden stabil.
+
+   Ein Absenden (POST) ohne passenden Session-Wert erzeugt **nichts**: Das Feld liefert dann
+   `""`, und die Policy lehnt mit „abgelaufen“ ab (veralteter Tab, § 5.1 unten).
 2. **Anzeigen.** Prompt-Stage `wlan-passwort-anzeige`:
 
    | Feld | Typ | Inhalt |
@@ -139,7 +142,8 @@ Geprüft gegen authentik 2026.8.3:
 | POST mit fremdem `wifi_password` | ignoriert, gespeichert wird der angezeigte Wert |
 | abbrechen, neu öffnen | dieselbe Passphrase, nichts gespeichert |
 | nach dem Speichern neu öffnen | neue Passphrase |
-| ohne Bestätigung absenden | abgelehnt mit Meldung, nichts gespeichert |
+| ohne Bestätigung absenden | abgelehnt mit Meldung, nichts gespeichert; ein schon gespeicherter Hash bleibt unverändert |
+| veralteter Tab absenden (zweiter Tab, nachdem der erste gespeichert hat) | abgelehnt als abgelaufen, gespeicherter Hash bleibt der angezeigte; mit der früheren Fassung (Erzeugen auch beim Absenden) wurde eine nie gesehene Passphrase gespeichert |
 | Nutzer nicht in der WLAN-Gruppe | Flow verweigert (`access-denied`) |
 
 ### 5.2 Gespeicherte Daten
@@ -291,10 +295,11 @@ ist dasselbe: Wer den Host hat, sieht ohnehin alles. README und Doku sagen das.
 - `PEAP_ENABLE` ist `true` oder `false`, sonst Abbruch mit Meldung.
 - Bei `true` werden die Pflichtvariablen geprüft; fehlt eine, bricht das Skript mit Meldung
   ab. Das ist ein Konfigurationsfehler, kein Ausfall.
-- Die drei DNs müssen auf `^[A-Za-z0-9=,._ -]{1,256}$` passen, sonst Abbruch. Sie landen
+- Die drei DNs müssen auf `^[A-Za-z0-9=,._ -]{1,255}$` passen, sonst Abbruch. Sie landen
   ungeescaped in der Konfiguration und im LDAP-Filter (`$ENV{}` wird beim Parsen eingesetzt,
   vor dem Escaping des Moduls). Ausgeschlossen sind damit `( ) * \ %`, Anführungszeichen,
-  NUL und Zeilenumbrüche. authentik-Gruppennamen mit anderen Zeichen brauchen einen anderen
+  NUL und Zeilenumbrüche. Die Obergrenze ist 255: Das `grep -E` von busybox im Image
+  (musl, `RE_DUP_MAX` 255) lehnt `{1,256}` ab. authentik-Gruppennamen mit anderen Zeichen brauchen einen anderen
   Gruppennamen.
 - `LDAP_HOST` muss eine literale IPv4-Adresse sein, wie `AUTHENTIK_RADIUS_HOST` (§ 6.0). Es
   gibt kein Auflösen und keinen Watcher. Der Pool verbindet nach Fehlern selbst neu. Geprüft:
@@ -320,8 +325,10 @@ Basis-Image `freeradius/freeradius-server:3.2.10-alpine` bringt `rlm_ldap`, `rlm
 
 - **`peap {}`** in `eap`: `tls = tls-common`, `default_eap_type = mschapv2`,
   `virtual_server = "peap-inner-tunnel"`, `copy_request_to_tunnel = no`,
-  `use_tunneled_reply = no`. Innere Reply-Attribute verlassen den Tunnel nicht; das passt zum
-  Nicht-Ziel „kein VLAN für PEAP“.
+  `use_tunneled_reply = no`. `use_tunneled_reply = no` hält die inneren Reply-Attribute,
+  vor allem den inneren `User-Name`, im Tunnel; der äußere Accept trägt die äußere Identität
+  `anonymous`. `MS-CHAP2-Success` entfernt `eap_mschapv2` selbst, auch mit `yes`. Das passt
+  zum Nicht-Ziel „kein VLAN für PEAP“.
 - **`default_eap_type` bleibt `ttls`.** Clients ohne Profil antworten auf den TTLS-Vorschlag
   mit NAK und bekommen PEAP; TTLS-Bestandsclients brauchen keine Extra-Runde. Die e2e prüft
   beide Richtungen.
@@ -411,7 +418,8 @@ Weitere Stufen:
 
 - TTLS/PAP-Baseline und VLAN laufen unverändert mit. NAK in beide Richtungen: ein PEAP-Client
   gegen den Standard `ttls` und ein TTLS-Client.
-- Kein Reply-Attribut aus dem inneren PEAP-Tunnel im äußeren Accept.
+- Kein Reply-Attribut aus dem inneren PEAP-Tunnel im äußeren Accept: Der äußere Accept trägt
+  `anonymous`, nicht den inneren Benutzer (das trennt `no` von `yes`).
 - LDAP-Stand-in gestoppt: PEAP wird abgelehnt, ohne über das Timeout hinaus zu hängen, TTLS
   geht weiter. Danach wieder gestartet: PEAP geht wieder.
 - **freeradius neu gestartet, während LDAP gestoppt ist**: radiusd kommt hoch, TTLS geht, PEAP
@@ -438,8 +446,8 @@ Ein Python-Test liest den Expression-Code aus dem Blueprint und prüft:
 
 ### 8.3 Integrationstest gegen echtes authentik (manuell, `workflow_dispatch`)
 
-`test/authentik/run.sh` startet authentik, PostgreSQL und beide Outposts in der gepinnten
-Version, spielt den Blueprint ein, führt den Flow per API aus, verbindet per `eapol_test`
+`test/authentik/run.sh` startet authentik, PostgreSQL und den LDAP-Outpost in der gepinnten
+Version (der RADIUS-Outpost gehört nicht zum PEAP-Pfad), spielt den Blueprint ein, führt den Flow per API aus, verbindet per `eapol_test`
 (PEAP) und prüft die Fälle aus § 8.1 gegen das echte System. Dazu:
 
 - Ein POST mit verändertem `wifi_password` setzt **nicht** dieses Passwort.
@@ -540,8 +548,11 @@ TTLS-Teil ist als #15 erfasst, weil er schon heute gilt.
 | Schlüssel | Standard |
 |---|---|
 | `wlan_group` | `wlan` |
+| `ldap_search_group` | `wlan-ldap-search` |
 | `ssid` | `WLAN` |
 | `radius_server_name` | `radius.example.com` |
+| `authentik_url` | `https://authentik.example.com` (authentik akzeptiert für die Kachel nur eine absolute `meta_launch_url`) |
+| `ldap_base_dn` | `dc=ldap,dc=goauthentik,dc=io` |
 
 ## 13. Revisionen
 
@@ -588,3 +599,17 @@ Nachtrag beim Schreiben des Plans: Umstieg mit aktuellem Compose geprüft (§ 6.
 `peap-modules.conf` (§ 6.3), Umfang des Blueprints und Gruppe `wlan-ldap-search` (§ 5).
 Die Log-Zeilen sind Englisch wie alle Logs des Stacks; die in § 9 genannten Texte sind ihre
 deutsche Bedeutung.
+
+**Revision 5, 2026-10-14, bei der Umsetzung.**
+
+| Befund | Änderung |
+|---|---|
+| `rejects()` im e2e zählte Abbruch durch `timeout` oder Kill als Ablehnung | prüft den Exit-Status; ein vom Timeout beendeter Container ist keine Ablehnung (Entrypoint-Stufen zu `AUTHENTIK_RADIUS_HOST`, `LDAP_HOST`) |
+| busybox-`grep -E` lehnt `{1,256}` ab (`RE_DUP_MAX` 255) | DN-Länge 1 bis 255 (§ 6.3) |
+| Gegenprobe zu `use_tunneled_reply` schlug nicht an: `MS-CHAP2-Success` entfernt `eap_mschapv2` selbst | e2e prüft die äußere Identität `anonymous` statt des inneren Benutzers (§ 6.4, § 8.1) |
+| e2e band nur `peapinactive` an die Log-Zeile des Verzeichnisses | alle drei Sperrgründe (`peapinactive`, `peapnogroup`, `peapnohash`) müssen die Zeile erzeugen (§ 8.1) |
+| Compose-Prüfung akzeptierte jede Ablehnung | der Render ohne `AUTHENTIK_LDAP_TOKEN` muss scheitern und die Variable nennen (§ 6.1) |
+| Blueprint wird byteweise verglichen, CRLF bricht den Test | `.gitattributes` erzwingt LF für `authentik/**` und `test/authentik/**` |
+| authentik lehnt eine relative `meta_launch_url` ab („Enter a valid URL“) | Kontext-Schlüssel `authentik_url` (§ 5, § 12) |
+| Integrationstest scheiterte früh (403, `invalidation_flow` leer) | wartet vor dem Import auf authentiks eigene Blueprints; Abweisungen müssen ein Access-Reject mit dem richtigen Grund sein; Event-Log-Prüfung mit Positivkontrolle und Paginierung; Absenden ohne Bestätigung darf den gespeicherten Hash nicht ändern (§ 8.3) |
+| Veralteter Tab speicherte eine nie angezeigte Passphrase (gegen echtes authentik bestätigt) | Erzeugen nur beim Rendern (GET); POST ohne passenden Session-Wert ergibt `""`, die Policy lehnt als abgelaufen ab (§ 5.1) |
