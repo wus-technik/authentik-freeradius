@@ -38,6 +38,18 @@ jobs:
           shellcheck freeradius/entrypoint.sh freeradius/healthcheck.sh \
                      test/e2e/client/auth.sh test/e2e/run.sh
 
+      - name: Check the Compose files
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml --env-file .env.example config >/dev/null
+          docker compose -f docker-compose.yml -f docker-compose.peap.yml --env-file .env.example config >/dev/null
+          #  Without the LDAP token the PEAP file must refuse to render.
+          grep -v '^AUTHENTIK_LDAP_TOKEN=' .env.example > /tmp/no-token.env
+          if docker compose -f docker-compose.yml -f docker-compose.peap.yml --env-file /tmp/no-token.env config >/dev/null 2>&1; then
+            echo "docker-compose.peap.yml rendered without AUTHENTIK_LDAP_TOKEN" >&2
+            exit 1
+          fi
+
   validate:
     #  Configuration syntax gate. Necessary but NOT sufficient -- radiusd -XC
     #  happily accepts a status_check setting that permanently breaks

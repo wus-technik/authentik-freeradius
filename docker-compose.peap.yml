@@ -1,0 +1,32 @@
+#  PEAP-MSCHAPv2 with a WiFi password generated in authentik (issue #14).
+#
+#  Add this file next to docker-compose.yml -- in Portainer as an additional
+#  path of the Git stack. Without it the stack serves EAP-TTLS only.
+#
+#  FreeRADIUS does not wait for this outpost: EAP-TTLS must work while LDAP is
+#  down, so a PEAP login right after a deploy fails until the outpost is ready.
+
+services:
+  authentik_ldap:
+    image: ghcr.io/goauthentik/ldap:${AUTHENTIK_VERSION:?set AUTHENTIK_VERSION to match your authentik server}
+    restart: unless-stopped
+    environment:
+      AUTHENTIK_HOST: ${AUTHENTIK_HOST:?set AUTHENTIK_HOST}
+      AUTHENTIK_TOKEN: ${AUTHENTIK_LDAP_TOKEN:?set AUTHENTIK_LDAP_TOKEN to the LDAP outpost token}
+      AUTHENTIK_INSECURE: ${AUTHENTIK_INSECURE:-false}
+    #  No published port: only FreeRADIUS talks to it, over the radius network.
+    networks:
+      radius:
+        ipv4_address: ${AUTHENTIK_LDAP_IP:-172.31.253.11}
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  freeradius:
+    environment:
+      PEAP_ENABLE: "true"
+      LDAP_HOST: ${AUTHENTIK_LDAP_IP:-172.31.253.11}
+      LDAP_BASE_DN: ${LDAP_BASE_DN:?set LDAP_BASE_DN to the base DN of the wlan-ldap provider}
+      LDAP_BIND_DN: ${LDAP_BIND_DN:?set LDAP_BIND_DN to the DN of svc-wlan-ldap}
+      LDAP_BIND_PASSWORD: ${LDAP_BIND_PASSWORD:?set LDAP_BIND_PASSWORD to the token of svc-wlan-ldap}
+      LDAP_WLAN_GROUP_DN: ${LDAP_WLAN_GROUP_DN:?set LDAP_WLAN_GROUP_DN to the DN of the WLAN group}
