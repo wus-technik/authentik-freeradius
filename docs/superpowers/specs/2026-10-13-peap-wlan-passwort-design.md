@@ -1,7 +1,7 @@
 # Design: PEAP-MSCHAPv2 mit eigenem, generiertem WLAN-Passwort aus authentik
 
 Datum: 2026-10-13
-Status: Entwurf, Revision 2 nach Codex-Review (§ 13), Freigabe ausstehend
+Status: Entwurf, Revision 3 nach Probe gegen echtes authentik (§ 11, § 13). Offen: § 11a
 Issue: #14 (Spike-Ergebnis dort). Bezug: #11, #7/#12 (für dieses Ziel zurückgestellt), #8
 
 ## 1. Ziel
@@ -83,46 +83,61 @@ manipulierter POST kann kein selbst gewähltes Passwort setzen.
 
 Ablauf:
 
-1. **Erzeugen.** Beim ersten Anzeigen der Prompt-Stage wird die Passphrase erzeugt und im
-   Flow-Plan-Kontext unter `wifi_password_pending` abgelegt. Ist der Schlüssel schon gesetzt
-   (erneutes Rendern derselben Stage), wird er wiederverwendet. Der konkrete Mechanismus ist
-   Prüfpunkt V1 (§ 11).
+1. **Erzeugen.** Die `initial_value_expression` des Felds `wifi_password` erzeugt die
+   Passphrase und legt sie in der **Session** unter `wifi_password_pending` ab, zusammen mit
+   dem aktuellen `wifi-password-set-at` des Nutzers als `base`. Steht dort schon ein Wert mit
+   derselben `base`, gibt sie diesen zurück. Unterscheidet sich `base`, ist das Passwort
+   inzwischen gespeichert worden, und sie erzeugt ein neues. Geprüft (V1):
+   - authentik wertet Read-only-Felder beim Rendern **und** beim Absenden serverseitig neu
+     aus und ignoriert den POST-Wert.
+   - Ein Schreiben in `prompt_context` überlebt den Request nicht: Jedes Rendern lieferte
+     einen anderen Wert.
+   - Der Session-Wert bleibt über erneutes Rendern und Absenden stabil.
 2. **Anzeigen.** Prompt-Stage `wlan-passwort-anzeige`:
 
    | Feld | Typ | Inhalt |
    |---|---|---|
-   | `wifi_password` | `text_read_only` | der Wert aus `wifi_password_pending` |
+   | `wifi_password` | `text_read_only` | Passphrase aus der Session |
    | `wifi_info` | `static` | SSID, Benutzername, erwarteter Zertifikatsname, Hinweis „wird nur jetzt angezeigt“ |
    | `wifi_ack` | `checkbox`, Pflicht | „Ich habe das Passwort notiert. Das bisherige WLAN-Passwort wird damit ungültig.“ |
 
 3. **Speichern.** Eine Validierungs-Policy `wlan-passwort-speichern` an der Prompt-Stage läuft
-   beim Absenden. Sie liest die Passphrase aus `wifi_password_pending`, **nicht** aus
-   `prompt_data`, und:
-   1. bestimmt den Nutzer aus `request.user` (der Flow verlangt eine Anmeldung);
-   2. berechnet den NT-Hash, `MD4(UTF-16LE(passwort))`, mit der eingebetteten MD4
+   beim Absenden. In `prompt_data` steht dort der serverseitig neu ausgewertete Wert von
+   `wifi_password`. Die Policy verlangt, dass er dem Session-Wert entspricht, und:
+   1. lehnt ab, wenn `wifi_ack` nicht genau `True` ist. Eine Pflicht-Checkbox mit `false`
+      gilt in authentik als ausgefüllt; geprüft, ohne diese Prüfung wurde gespeichert;
+   2. bestimmt den Nutzer aus `request.user` (der Flow verlangt eine Anmeldung);
+   3. berechnet den NT-Hash, `MD4(UTF-16LE(passwort))`, mit der eingebetteten MD4
       (authentik hat kein MD4, OpenSSL 3);
-   3. schreibt in einer Transaktion mit `select_for_update()` auf den frisch gelesenen
+   4. schreibt in einer Transaktion mit `select_for_update()` auf den frisch gelesenen
       Nutzer nur die beiden Schlüssel aus § 5.2 und speichert mit
       `save(update_fields=["attributes"])`. So überschreibt sie keinen parallelen
       Schreibvorgang auf andere Attribute.
-   4. entfernt `wifi_password_pending` aus dem Plan-Kontext, soweit der Mechanismus aus V1
-      das zulässt;
-   5. gibt `True` zurück. Bei jeder Exception gibt sie `False` zurück und schreibt nichts.
+   5. entfernt `wifi_password_pending` aus der Session;
+   6. gibt `True` zurück. Bei jeder Exception gibt sie `False` mit einer Meldung zurück und
+      schreibt nichts.
 
    Der Flow endet und leitet zur Bibliothek.
 
 Erzeugen beim Anzeigen, Speichern erst beim Absenden: Bricht der Nutzer ab, bleibt das
-bisherige WLAN-Passwort gültig.
+bisherige WLAN-Passwort gültig, und beim nächsten Öffnen erscheint dieselbe, noch nicht
+aktive Passphrase.
 
-Im Spike lief eine Policy in einem eigenen Prozess, deshalb schreibt sie über das ORM und nicht
-über das `request.user`-Objekt. Das ist eine Beobachtung aus dem Spike, keine Garantie;
-authentik führt Policies je nach Worker auch im selben Prozess aus. Das Design funktioniert in
-beiden Fällen, V1 muss es aber für den Plan-Kontext belegen.
+In der Probe lief die Validierungs-Policy im Prozess des Web-Workers, und das Entfernen aus der
+Session wirkte. Darauf verlässt sich das Design nicht: Läuft die Policy in einem anderen
+Prozess und geht das Entfernen verloren, sorgt die `base`-Prüfung aus Schritt 1 trotzdem für
+ein neues Passwort beim nächsten Durchlauf.
 
-**Ausweichlösung, falls V1 keinen Weg findet, einen Wert serverseitig über das Absenden zu
-halten:** Erzeugen und Speichern fallen zusammen. Die Expression, die das Passwort erzeugt,
-schreibt den Hash sofort; die Checkbox ist nur noch Bestätigung. Preis: Wer die Seite öffnet
-und abbricht, hat sein altes WLAN-Passwort trotzdem verloren. Der Hinweistext sagt das.
+Geprüft gegen authentik 2026.8.3:
+
+| Fall | Ergebnis |
+|---|---|
+| zweimal rendern, dann absenden | dieselbe Passphrase; gespeicherter Hash passt zum angezeigten Wert |
+| POST mit fremdem `wifi_password` | ignoriert, gespeichert wird der angezeigte Wert |
+| abbrechen, neu öffnen | dieselbe Passphrase, nichts gespeichert |
+| nach dem Speichern neu öffnen | neue Passphrase |
+| ohne Bestätigung absenden | abgelehnt mit Meldung, nichts gespeichert |
+| Nutzer nicht in der WLAN-Gruppe | Flow verweigert (`access-denied`) |
 
 ### 5.2 Gespeicherte Daten
 
@@ -136,13 +151,15 @@ Zu den Namen:
 - Der Bindestrich macht die Namen zu gültigen LDAP-Attributnamen (RFC 4512 erlaubt keinen
   Unterstrich). Das braucht das Test-Directory (§ 8.1); authentik reicht den Schlüssel laut
   Spike unverändert durch.
-- `password` im Namen sorgt dafür, dass authentiks Bereinigung (`PASS` im Schlüssel) den Wert
-  in Event-Diffs schwärzt. V4 prüft das.
+- `password` im Namen soll dafür sorgen, dass authentiks Bereinigung (`PASS` im Schlüssel)
+  den Wert in Event-Diffs schwärzt. Ohne Enterprise-Lizenz schreibt authentik bei
+  `model_updated` gar keinen Diff (geprüft, V4). Der Name schützt erst, falls die Lizenz
+  später dazukommt; das ist ungeprüft.
 
-Der Hash ist die einzige dauerhafte Ablage. Die Passphrase steht kurz im Klartext im
-Flow-Plan, also in der Session, und Sessions liegen in PostgreSQL. Sie verschwindet mit dem
-Ende des Flows oder spätestens mit dem Ablauf der Session; bis dahin ist sie auch in
-DB-Backups denkbar. Das ist vertretbar, weil die Passphrase nirgends sonst gilt.
+Der Hash ist die einzige dauerhafte Ablage. Die Passphrase steht im Klartext in der Session,
+und Sessions liegen in PostgreSQL. Sie verschwindet beim Speichern, bei Abbruch spätestens mit
+dem Ablauf der Session; bis dahin ist sie auch in DB-Backups denkbar. Das ist vertretbar, weil
+die Passphrase nirgends sonst gilt.
 
 Löschen von `wifi-password-nthash` sperrt den WLAN-Zugang des Nutzers, bis er ein neues
 Passwort holt.
@@ -154,9 +171,12 @@ schreiben nur deklarierte Felder. Die Doku sagt, dass ein Prompt mit Feldnamen
 
 ### 5.3 Passphrase
 
-- **Sechs** Wörter aus der **EFF Short Wordlist 1** (1296 Wörter, CC BY 3.0), mit
-  Bindestrich getrennt, Kleinbuchstaben. Beispiel: `acorn-tulip-gravy-mango-swift-ample`.
-- Entropie 6 × log2(1296) ≈ 62 Bit. Zufall aus `secrets.choice`.
+- **Sechs** Wörter aus der **EFF Short Wordlist 1** (CC BY 3.0), mit Bindestrich getrennt,
+  Kleinbuchstaben. Beispiel aus der Probe: `sleet-stray-agent-data-swear-gloss`.
+- Die Liste hat 1296 Einträge. `yo-yo` fällt heraus, weil der Bindestrich das Trennzeichen
+  ist; es bleiben 1295 Wörter mit 3 bis 5 Buchstaben.
+- Entropie 6 × log2(1295) ≈ 62 Bit. Zufall aus `secrets.choice`.
+- Die Liste steht direkt in der Expression; die gesamte Expression ist rund 11 KB groß.
 - Kurze, gängige Wörter ohne Umlaute, damit das Tippen am Handy klappt. Englisch ist der Preis
   für eine fertig lizenzierte Liste; eine deutsche Liste kann später die Datei ersetzen.
 
@@ -187,13 +207,21 @@ DES-Weg bleibt. Gegen den DES-Weg hilft nur, dass Nutzer das Zertifikat prüfen 
 - Search-Mode `direct`, Bind-Mode `direct`. `cached` würde Deaktivierungen verzögern.
 - Eigener Bind-Flow für den Provider: Identification und Password ohne MFA, Password-Stage mit
   dem Backend „authentik Tokens“. Mit MFA im Bind-Flow scheitert der Bind.
-- Servicekonto `svc-wlan-ldap` (Typ Service Account), Rolle mit der Permission
-  `search_full_directory` auf diesem Provider. Bind mit einem App-Passwort-Token des Kontos.
-  Der Token läuft **nicht** ab, weil ein abgelaufener Token PEAP leise abschaltet. Rotation ist
-  ein dokumentierter, manueller Schritt; ein fehlschlagender Bind erzeugt eine eigene Log-Zeile
-  (§ 9), die das Monitoring auswertet.
+- Servicekonto `svc-wlan-ldap` (Typ Service Account, angelegt mit `expiring: false`), Rolle
+  mit der Permission `search_full_directory` auf diesem Provider. authentik legt dabei selbst
+  einen Token mit Intent `app_password` und `expiring: false` an; mit ihm bindet FreeRADIUS.
+  Ein abgelaufener Token würde PEAP leise abschalten. Rotation ist ein dokumentierter,
+  manueller Schritt; ein fehlschlagender Bind erzeugt eine eigene Log-Zeile (§ 9), die das
+  Monitoring auswertet.
 - Die Anwendung des Providers ist nur an das Servicekonto gebunden; normale Nutzer können sich
   dort nicht binden.
+
+Geprüft (V3, V5):
+- Der Token-Bind über den Bind-Flow funktioniert.
+- Der Filter aus § 6.4 liefert `wifi-password-nthash` und `ak-active`.
+- Ein Nutzer ohne Hash wird nicht gefunden.
+- Ein falscher Token ergibt `Invalid credentials`.
+- Ein normaler Nutzer bekommt `Insufficient access`.
 
 ## 6. Stack
 
@@ -239,6 +267,11 @@ ist dasselbe: Wer den Host hat, sieht ohnehin alles. README und Doku sagen das.
   `rlm_ldap` gibt dagegen eine URI an libldap, das beim Verbindungsaufbau neu auflöst, und der
   Pool verbindet nach Fehlern neu. Ein Watcher würde bei jeder Adressänderung des
   LDAP-Outposts radiusd neu starten und damit TTLS-Sitzungen abreißen, ohne etwas zu gewinnen.
+  Geprüft: Nach Stopp und Neustart des Outposts geht PEAP ohne Neustart von radiusd wieder.
+- **Offen, Entscheidung nötig (§ 11a):** Ist der Outpost-Container gestoppt, kennt Dockers DNS
+  den Namen nicht mehr und fragt den DNS des Hosts. In der Probe kam dabei eine **öffentliche
+  Adresse** zurück, über eine Such-Domain mit Wildcard-Eintrag. Die Anfragen landen dann bei
+  einem fremden Host.
 - Schaltmechanismus nach dem Muster von `vlan-map.conf`: Das Skript schreibt drei Dateien
   unter `/run/radiusd/`. Bei `true` enthält jede ein `$INCLUDE` auf eine Datei im Image, bei
   `false` ist sie leer:
@@ -277,24 +310,42 @@ Basis-Image `freeradius/freeradius-server:3.2.10-alpine` bringt `rlm_ldap`, `rlm
   wirken bei PEAP nicht: MSK und `MS-MPPE-*-Key` im äußeren Accept leitet das äußere `eap` aus
   dem TLS-Tunnel ab.
 - **`inner-eap`**: `eap`-Instanz nur mit `mschapv2`.
-- **Neuer Virtual Server `peap-inner-tunnel`**, getrennt von `proxy-inner-tunnel`:
+- **Neuer Virtual Server `peap-inner-tunnel`**, getrennt von `proxy-inner-tunnel`. So lief er
+  in der Probe:
 
   ```
   authorize {
-      inner-eap { ok = return }    # EAP-Runden ohne Antwort-Daten
+      inner-eap { ok = return }    # EAP-Identity-Runde
       ldap
       if (notfound) { reject }     # kein aktiver WLAN-Nutzer mit WLAN-Passwort
       pap                          # normalisiert NT-Password: 32 Hex-Zeichen → 16 Bytes
   }
   authenticate {
-      Auth-Type eap     { inner-eap }
-      Auth-Type MS-CHAP { mschap }
+      Auth-Type inner-eap { inner-eap }
+      mschap                       # erzeugt "Auth-Type mschap", das eap_mschapv2 aufruft
   }
   ```
 
-  Skizze, nicht wörtlich. Ohne `pap` stünden 32 ASCII-Bytes in `NT-Password`, und `mschap`
-  verwürfe den Wert. Ein LDAP-Fehler liefert `fail`, das bereits ablehnt (fail closed). Beide
-  Fälle schreiben eine eigene Log-Zeile (§ 9).
+  Gegenüber Revision 2 korrigiert, beides in der Probe gefunden:
+  - Die Instanz `inner-eap` verlangt eine Sektion `Auth-Type inner-eap`. Mit `Auth-Type eap`
+    bricht radiusd beim Start ab.
+  - `eap_mschapv2` ruft `Auth-Type mschap` auf. Eine Sektion `Auth-Type MS-CHAP` allein findet
+    es nicht und lehnt jedes Passwort ab.
+
+  Ohne `pap` lehnt `mschap` auch das richtige Passwort ab; die Probe hat das bestätigt. Ein
+  LDAP-Fehler liefert `fail`, das bereits ablehnt (fail closed). Beide Fälle schreiben eine
+  eigene Log-Zeile (§ 9).
+
+  Ergebnisse gegen den echten LDAP-Outpost:
+
+  | Fall | Ergebnis |
+  |---|---|
+  | richtiges Passwort | SUCCESS, MPPE-Schlüssel stimmen |
+  | falsches Passwort | FAILURE |
+  | Nutzer ohne Hash | FAILURE |
+  | radiusd startet bei gestopptem LDAP | startet |
+  | LDAP gestoppt, Outpost über IP angesprochen | FAILURE nach etwa 2 s |
+  | LDAP zurück, ohne Neustart von radiusd | SUCCESS |
 - Der äußere `default`-Server und `proxy-inner-tunnel` bleiben unverändert.
 
 ## 7. Ablauf für die Nutzer
@@ -314,8 +365,10 @@ Basis-Image `freeradius/freeradius-server:3.2.10-alpine` bringt `rlm_ldap`, `rlm
 
 Der RADIUS-Outpost ist in der e2e heute ein FreeRADIUS-Stand-in. Für LDAP kommt ein
 Directory-Stand-in dazu, das den Filter aus § 6.4 unverändert auswerten muss, inklusive der
-eigenen Attribute `ak-active` und `wifi-password-nthash`. Ob glauth das kann oder OpenLDAP mit
-einem kleinen Schema nötig ist, klärt V7. Vier Nutzer:
+eigenen Attribute `ak-active` und `wifi-password-nthash`. glauth scheidet aus (V7): Es gab die
+eigenen Attribute nicht einmal zurück. Das Stand-in ist **OpenLDAP mit einem kleinen
+Schema**, das `ak-active`, `wifi-password-nthash` und `memberOf` als gewöhnliche Attribute
+definiert. Ein memberOf-Overlay ist für das Stand-in nicht nötig. Vier Nutzer:
 
 | Nutzer | Zustand | Erwartung |
 |---|---|---|
@@ -349,8 +402,10 @@ Ein Python-Test liest den Expression-Code aus dem Blueprint und prüft:
 - MD4 gegen die Testvektoren aus RFC 1320.
 - NT-Hash von `password` = `8846F7EAEE8FB117AD06BDD830B7586C`.
 - Passphrase: sechs Wörter, alle aus der Liste.
-- Gespeichert wird der Wert aus dem Plan-Kontext, nicht aus `prompt_data`.
+- Gespeichert wird nur, wenn der Wert aus `prompt_data` dem Session-Wert entspricht.
+- Ohne `wifi_ack is True` wird nichts geschrieben.
 - Bei einer Exception wird nichts geschrieben.
+- Die `base`-Logik: gleiche `base` heißt dieselbe Passphrase, neue `base` heißt eine neue.
 
 ### 8.3 Integrationstest gegen echtes authentik (manuell, `workflow_dispatch`)
 
@@ -389,30 +444,67 @@ Ergebnis kommt in `docs/clients.md`.
   bekommt so Challenge und Response; der NT-Hash kostet danach etwa 2^56 DES-Operationen
   offline (§ 5.3). Gegenmittel sind Schulung (angezeigter Zertifikatsname) und auf verwalteten
   Geräten trotzdem ein Profil. Restrisiko, dokumentiert.
-- **Klartext in der Session** bis Flow-Ende bzw. Session-Ablauf (§ 5.2).
+- **Klartext in der Session** bis zum Speichern bzw. bis zum Session-Ablauf (§ 5.2).
+- **Fremde Adresse für einen gestoppten Outpost** (§ 6.3, § 11a): LDAP-Bind-Token und
+  Anfragen könnten an einen fremden Host gehen.
 - **Event-Log**: Der Attributname enthält `password`, damit authentik den Wert in Diffs
   schwärzt. V4 und § 8.3 prüfen das.
 - **Andere Abflusswege des Hashes**: Admin-UI und -API sowie Blueprint-Exporte zeigen
   `attributes` vollständig. Der LDAP-Provider ist nur dem Servicekonto zugänglich (§ 5.5).
 - Der Token `LDAP_BIND_PASSWORD` steht wie die übrigen Secrets in der Compose-Umgebung.
 
-## 11. Vor dem Plan zu verifizieren
+## 11. Prüfergebnisse
 
-Kurze Proben gegen echtes authentik 2026.8.3. Fällt eine durch, steht die Ausweichlösung
-daneben.
+Probe am 2026-10-13 gegen authentik 2026.8.3 mit echtem LDAP-Outpost und FreeRADIUS 3.2.10,
+Wegwerf-Setup, nichts davon im Repo.
 
-| # | Annahme | Ausweichlösung |
+| # | Annahme | Ergebnis |
 |---|---|---|
-| V1 | Ein Wert lässt sich beim Anzeigen der Prompt-Stage einmal im Flow-Plan-Kontext ablegen und ist beim Absenden in der Validierungs-Policy lesbar. Kandidaten in dieser Reihenfolge: (a) die `initial_value_expression` von `wifi_password` legt den Wert in `prompt_context` bzw. im Plan ab und gibt ihn bei erneutem Rendern wieder; (b) eine Policy an der Stage-Binding mit `evaluate_on_plan` schreibt in `context["flow_plan"].context`. Zu prüfen ist auch, ob authentik `text_read_only`-Felder beim Absenden neu auswertet; das Design verlässt sich auf keines der beiden Verhalten. | Erzeugen und Speichern zusammenlegen (§ 5.1) |
-| V2 | Validierungs-Policies einer Prompt-Stage laufen beim Absenden, sehen den Plan-Kontext und können mit `False` abweisen | Policy an einer Folge-Stage (Spike-Weg) mit einer Stage ohne sichtbaren Schritt |
-| V3 | Ein LDAP-Bind über den Bind-Flow mit dem Backend „authentik Tokens“ funktioniert mit einem App-Passwort-Token eines Servicekontos, und der Token lässt sich ohne Ablauf anlegen | Passwort am Servicekonto setzen |
-| V4 | Das Speichern erzeugt keinen Event, der den Hash lesbar enthält | Event-Retention kurz halten und dokumentieren |
-| V5 | authentik gibt `wifi-password-nthash` mit Bindestrich unverändert als LDAP-Attribut aus und filtert darauf | Unterstrich-Name in authentik, Mapping nur im Test-Directory |
-| V6 | Portainer bindet eine zusätzliche Compose-Datei bei Git-Stacks ein | Compose-Profile (`COMPOSE_PROFILES`) |
-| V7 | glauth wertet eigene Attribute und `memberOf` im Suchfilter aus | OpenLDAP mit kleinem Schema |
+| V1 | Ein Wert überlebt vom Rendern bis zum Absenden | **ja, über die Session** (§ 5.1). Der Prompt-Kontext funktioniert dafür nicht. Read-only-Felder werden beim Absenden serverseitig neu ausgewertet; ein manipulierter POST wird ignoriert. |
+| V2 | Validierungs-Policy sieht die Werte und kann abweisen | **ja.** Sie sieht `prompt_data` mit den Serverwerten und lehnt mit Meldung ab. Neu gefunden: Eine Pflicht-Checkbox mit `false` gilt als ausgefüllt, die Policy prüft sie selbst. |
+| V3 | Servicekonto bindet mit Token, Token ohne Ablauf | **ja.** Intent `app_password`, `expiring: false`, Bind über eigenen Flow mit Token-Backend. |
+| V4 | Kein Event mit dem Hash | **ja.** Weder das Speichern im Flow noch eine Admin-Änderung der Attribute über die API schreibt den Wert in ein Event; ohne Enterprise-Lizenz gibt es keinen Diff. |
+| V5 | Attribut mit Bindestrich als LDAP-Attribut und im Filter | **ja.** |
+| V6 | Portainer bindet eine zusätzliche Compose-Datei ein | **ja, laut Sekundärquelle**: Git-Stacks haben in CE das Feld „Additional paths“. Beim ersten echten Deploy bestätigen. |
+| V7 | glauth als LDAP-Stand-in | **nein.** Eigene Attribute kamen nicht zurück. OpenLDAP mit kleinem Schema (§ 8.1). |
+| V8 | Module im Basis-Image | **ja.** `rlm_ldap`, `rlm_mschap`, `rlm_eap_peap`, `rlm_eap_mschapv2`. |
 
-Geprüft und damit erledigt: `rlm_ldap`, `rlm_mschap`, `rlm_eap_peap` und `rlm_eap_mschapv2`
-sind im Basis-Image vorhanden.
+Dazu korrigiert die Probe § 6.4 an zwei Stellen (`Auth-Type inner-eap`, nacktes `mschap`) und
+findet § 11a.
+
+## 11a. Offen: gestoppter Outpost, fremde Adresse
+
+**Befund.** Ist ein Outpost-Container gestoppt, löst Dockers DNS seinen Namen nicht mehr selbst
+auf und leitet die Anfrage an den DNS des Hosts weiter. In der Probe kam so eine öffentliche
+Adresse zurück: Der Host-Resolver hängte eine Such-Domain an, und die hat einen
+Wildcard-Eintrag. Auch ein Punkt am Namensende half nicht. Ob ein Produktionshost das genauso
+tut, hängt von seinem Resolver ab. Verlassen kann sich das Design darauf nicht.
+
+Folgen:
+
+- **PEAP (neu):** `rlm_ldap` verbindet sich mit der fremden Adresse und sendet den Bind mit dem
+  Servicekonto-Token im Klartext. Nebenbei hängt jeder Verbindungsversuch rund 9 s, und eine
+  PEAP-Anfrage dauerte so 21 s statt 2 s.
+- **TTLS (bestehender Code, #5):** Der Adress-Watcher sieht eine neue Adresse, startet radiusd
+  neu, und der Entrypoint legt radiusd auf die fremde Adresse fest. Access-Requests mit
+  PAP-Passwörtern, nur durch das Shared Secret verschleiert, gingen dann an diesen Host. Der
+  Befund betrifft also schon den Stand auf `develop`.
+
+**Optionen:**
+
+1. **Feste Adressen (Empfehlung).** Das Compose-Netz `radius` bekommt ein festes Subnetz
+   (Variable, mit Standardwert), beide Outposts feste `ipv4_address`. FreeRADIUS spricht sie
+   über die IP an. DNS ist aus dem Pfad, der Watcher aus #5 wird überflüssig (eine literale IP
+   schaltet ihn heute schon ab), und der LDAP-Ausfall endet nach etwa 2 s. Preis: Das Subnetz
+   darf mit nichts am Host kollidieren; das ist eine Variable mehr.
+2. **Adressprüfung im Entrypoint.** Nur Adressen aus dem eigenen Docker-Netz des Containers
+   werden angenommen, für den RADIUS- wie den LDAP-Outpost. Für LDAP bräuchte es dann wieder
+   Auflösen, Festlegen und einen Watcher, also genau das, was Revision 2 gestrichen hat.
+3. **LDAPS mit Zertifikatsprüfung.** Schützt den Token, aber nicht den TTLS-Pfad, und braucht
+   ein Zertifikat am Provider samt CA-Datei für FreeRADIUS.
+
+Die Entscheidung fällt vor dem Plan. Unabhängig davon gehört der TTLS-Teil in ein eigenes
+Issue, weil er schon heute gilt.
 
 ## 12. Standardwerte für den Blueprint-Kontext
 
@@ -446,3 +538,16 @@ sind im Basis-Image vorhanden.
 
 Verworfen: LDAP-Injection über `User-Name`. `rlm_ldap` escaped Werte im `user.filter` selbst;
 die Spec verlangt jetzt ausdrücklich, dass der Filter dort steht.
+
+**Revision 3, 2026-10-13, nach der Probe gegen authentik 2026.8.3 (§ 11).**
+
+| Befund | Änderung |
+|---|---|
+| Schreiben in `prompt_context` überlebt den Request nicht; Read-only-Felder werden beim Absenden neu ausgewertet | Passphrase in der Session mit `base`-Prüfung (§ 5.1) |
+| Pflicht-Checkbox mit `false` gilt als ausgefüllt | Policy prüft `wifi_ack is True` (§ 5.1) |
+| `inner-eap` verlangt `Auth-Type inner-eap`; `eap_mschapv2` ruft `Auth-Type mschap` | Skizze in § 6.4 korrigiert |
+| glauth liefert eigene Attribute nicht | OpenLDAP-Stand-in (§ 8.1) |
+| `yo-yo` enthält das Trennzeichen | 1295 Wörter (§ 5.3) |
+| Ohne Enterprise kein Event-Diff | § 5.2 präzisiert |
+| Gestoppter Outpost löst auf fremde Adresse auf, betrifft auch TTLS | § 11a, Entscheidung offen |
+
