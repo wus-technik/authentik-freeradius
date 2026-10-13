@@ -57,7 +57,7 @@ echo "== building =="
 "${COMPOSE[@]}" run --rm certgen >/dev/null
 
 echo "== starting stack =="
-"${COMPOSE[@]}" up -d authentik_radius freeradius
+"${COMPOSE[@]}" up -d authentik_radius authentik_ldap freeradius
 sleep 10
 
 echo "== baseline authentication =="
@@ -156,6 +156,87 @@ rejects "LDAP_HOST must be a literal IPv4 address" "${peap_on[@]}" LDAP_HOST=aut
 rejects "LDAP_WLAN_GROUP_DN may only contain" "${peap_on[@]}" "LDAP_WLAN_GROUP_DN=cn=wlan(x),ou=groups,dc=ldap,dc=goauthentik,dc=io"
 rejects "LDAP_BASE_DN may only contain" "${peap_on[@]}" "LDAP_BASE_DN=dc=%{User-Name},dc=io"
 rejects "LDAP_PORT must be a port number" "${peap_on[@]}" LDAP_PORT=3389x
+echo "   ok"
+
+peap() { auth -e AUTH_METHOD=peap -e AUTH_USER="$1" -e AUTH_PASSWORD="$2"; }
+
+echo "== PEAP-MSCHAPv2 against the LDAP outpost =="
+peap peapuser e2e-peap-pw || fail "PEAP with the right WiFi password was rejected"
+if peap peapuser wrong-password; then fail "PEAP accepted a wrong password"; fi
+for u in peapinactive peapnogroup peapnohash; do
+	if peap "$u" e2e-peap-pw; then fail "PEAP accepted $u, who must be refused"; fi
+done
+"${COMPOSE[@]}" logs freeradius 2>&1 	| grep -q 'peap: no active WLAN user with a WiFi password: peapinactive' 	|| fail "no log line for the refused PEAP login of peapinactive"
+# User-Name goes into an LDAP filter; metacharacters must not widen it.
+for u in '*' 'peapuser)(cn=*' 'peap*'; do
+	if peap "$u" e2e-peap-pw; then fail "PEAP accepted the user name '$u'"; fi
+done
+echo "   ok"
+
+echo "== nothing from inside the PEAP tunnel reaches the access point =="
+accept="$("${COMPOSE[@]}" run --rm --quiet-pull -e AUTH_METHOD=peap -e AUTH_DUMP=1 client 2>/dev/null 	| sed -n '/code=2 (Access-Accept)/,/^[^ ]/p')"
+[ -n "$accept" ] || fail "no Access-Accept for peapuser"
+# Positive control: the MPPE keys (Microsoft vendor 311 = 0x137, type 16/17)
+# must be there, or the pattern below proves nothing.
+printf '%s
+' "$accept" | grep -qi 'Value: 0000013710' 	|| fail "MS-MPPE-Send-Key missing from the outer Access-Accept"
+# MS-CHAP2-Success is vendor 311 type 26 (0x1a). It belongs inside the tunnel.
+if printf '%s
+' "$accept" | grep -qi 'Value: 000001371a'; then
+	fail "MS-CHAP2-Success from inside the tunnel leaked into the outer Access-Accept"
+fi
+# eap_mschapv2 strips MS-CHAP2-Success itself, so the check above holds even
+# with use_tunneled_reply = yes. What that setting does let through is the
+# inner User-Name: the outer reply then names the inner identity instead of the
+# anonymous outer one. That is the pattern that fails on a regression.
+if printf '%s\n' "$accept" | grep -q "Value: 'peapuser'"; then
+	fail "the inner identity from inside the tunnel leaked into the outer Access-Accept"
+fi
+printf '%s\n' "$accept" | grep -q "Value: 'anonymous'" \
+	|| fail "the outer User-Name (anonymous) is missing from the Access-Accept"
+echo "   ok"
+
+echo "== PEAP while the LDAP outpost is down =="
+"${COMPOSE[@]}" stop authentik_ldap >/dev/null
+start=$(date +%s)
+if peap peapuser e2e-peap-pw; then fail "PEAP succeeded with the LDAP outpost stopped"; fi
+took=$(( $(date +%s) - start ))
+[ "$took" -le 15 ] || fail "PEAP took ${took}s to fail with the LDAP outpost down; it must fail fast"
+auth || fail "EAP-TTLS failed while only the LDAP outpost was down"
+echo "   ok (PEAP refused in ${took}s, EAP-TTLS unaffected)"
+
+echo "== radiusd restarted while the LDAP outpost is down =="
+"${COMPOSE[@]}" restart freeradius >/dev/null
+deadline=$(( $(date +%s) + 60 ))
+until auth; do
+	[ "$(date +%s)" -lt "$deadline" ] || fail "radiusd did not come back without the LDAP outpost"
+	sleep 3
+done
+if peap peapuser e2e-peap-pw; then fail "PEAP succeeded with the LDAP outpost stopped"; fi
+echo "   ok"
+
+echo "== LDAP outpost back, no radiusd restart =="
+before="$(started_at freeradius)"
+"${COMPOSE[@]}" start authentik_ldap >/dev/null
+deadline=$(( $(date +%s) + 60 ))
+until peap peapuser e2e-peap-pw; do
+	[ "$(date +%s)" -lt "$deadline" ] || fail "PEAP did not recover after the LDAP outpost came back"
+	sleep 3
+done
+[ "$(started_at freeradius)" = "$before" ] || fail "radiusd restarted to reconnect to LDAP; it must not"
+echo "   ok"
+
+echo "== LDAP outpost recreated keeps its address =="
+"${COMPOSE[@]}" rm -sf authentik_ldap >/dev/null 2>&1
+"${COMPOSE[@]}" up -d --no-deps authentik_ldap >/dev/null 2>&1
+ip="$(service_ip authentik_ldap)"
+[ "$ip" = 172.28.0.11 ] || fail "the LDAP outpost came back on '$ip', not on its fixed 172.28.0.11"
+deadline=$(( $(date +%s) + 60 ))
+until peap peapuser e2e-peap-pw; do
+	[ "$(date +%s)" -lt "$deadline" ] || fail "PEAP did not recover after the LDAP outpost was recreated"
+	sleep 3
+done
+[ "$(started_at freeradius)" = "$before" ] || fail "radiusd restarted after the LDAP outpost was recreated"
 echo "   ok"
 
 echo "== PEAP switched off =="

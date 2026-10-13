@@ -1,0 +1,54 @@
+dn: dc=ldap,dc=goauthentik,dc=io
+objectClass: dcObject
+objectClass: organization
+dc: ldap
+o: e2e
+
+dn: ou=users,dc=ldap,dc=goauthentik,dc=io
+objectClass: organizationalUnit
+ou: users
+
+dn: ou=groups,dc=ldap,dc=goauthentik,dc=io
+objectClass: organizationalUnit
+ou: groups
+
+dn: cn=svc-wlan-ldap,ou=users,dc=ldap,dc=goauthentik,dc=io
+objectClass: person
+cn: svc-wlan-ldap
+sn: svc
+userPassword: e2e-ldap-bind-not-a-real-one
+
+dn: cn=peapuser,ou=users,dc=ldap,dc=goauthentik,dc=io
+objectClass: person
+objectClass: akUser
+cn: peapuser
+sn: peapuser
+ak-active: TRUE
+memberOf: cn=wlan,ou=groups,dc=ldap,dc=goauthentik,dc=io
+wifi-password-nthash: 3CBA95EBEBA7DC7C85D03AFC1841D753
+
+dn: cn=peapinactive,ou=users,dc=ldap,dc=goauthentik,dc=io
+objectClass: person
+objectClass: akUser
+cn: peapinactive
+sn: peapinactive
+ak-active: FALSE
+memberOf: cn=wlan,ou=groups,dc=ldap,dc=goauthentik,dc=io
+wifi-password-nthash: 3CBA95EBEBA7DC7C85D03AFC1841D753
+
+dn: cn=peapnogroup,ou=users,dc=ldap,dc=goauthentik,dc=io
+objectClass: person
+objectClass: akUser
+cn: peapnogroup
+sn: peapnogroup
+ak-active: TRUE
+wifi-password-nthash: 3CBA95EBEBA7DC7C85D03AFC1841D753
+
+dn: cn=peapnohash,ou=users,dc=ldap,dc=goauthentik,dc=io
+objectClass: person
+objectClass: akUser
+cn: peapnohash
+sn: peapnohash
+ak-active: TRUE
+memberOf: cn=wlan,ou=groups,dc=ldap,dc=goauthentik,dc=io
+
