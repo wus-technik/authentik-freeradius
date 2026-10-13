@@ -83,20 +83,24 @@ docker compose logs freeradius | grep -iE 'zombie|dead|alive'
 
 `Marking home server ... as dead.` with no later `alive again` is this fault.
 
-**Authentication stopped after the outpost alone was recreated** — an authentik version
-bump, an image update, or `docker compose up -d authentik_radius` replaces that container
-and Docker gives it a new bridge address. FreeRADIUS resolves the outpost **once at
-startup**, so the container checks the name every `OUTPOST_RESOLVE_INTERVAL` seconds
-(default 15) and restarts itself when the address has moved. Expect a short gap, then:
+**`AUTHENTIK_RADIUS_HOST must be a literal IPv4 address`** — the outpost is addressed by
+its fixed IP on the `radius` network, never by name. A stopped container's name is
+forwarded to the host's resolver, which can answer with an address outside the stack;
+FreeRADIUS would then send inner requests there (issue #15). Keep
+`AUTHENTIK_RADIUS_HOST: ${AUTHENTIK_RADIUS_IP}` from `docker-compose.yml`.
+
+**Upgrading from a version without fixed addresses** — the `radius` network gets a fixed
+subnet. A current Docker Compose recreates the network and the containers on the next
+deploy by itself. If the deploy fails on the network instead, or the outpost does not come
+up on `AUTHENTIK_RADIUS_IP`, remove the old network once and deploy again:
 
 ```bash
-docker compose logs freeradius | grep 'outpost address changed'
+docker compose down
+docker network rm <stack>_radius
 ```
 
-If authentication stays down, check that the watcher is running at all: it logs
-`address watcher armed` at startup, it is off when `OUTPOST_RESOLVE_INTERVAL=0` or when
-`AUTHENTIK_RADIUS_HOST` is a literal address, and it depends on the `restart:` policy to
-bring the container back.
+In Portainer: stop the stack, delete the `<stack>_radius` network under **Networks**,
+then deploy. Check the result with `docker network inspect <stack>_radius`.
 
 **Authentication stopped working weeks after deployment** — the certificate was renewed and
 the container is still serving the old one. Set `CERT_RELOAD_WATCH=true`, and confirm

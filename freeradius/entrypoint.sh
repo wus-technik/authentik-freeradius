@@ -1,8 +1,7 @@
 #!/bin/sh
 #
-# Validates the environment, generates the healthcheck secret, pins the
-# outpost address and watches it for change, optionally watches the TLS
-# certificate for renewal, then hands off to radiusd.
+# Validates the environment, generates the healthcheck secret, optionally
+# watches the TLS certificate for renewal, then hands off to radiusd.
 #
 # Secrets are NOT templated into configuration files. FreeRADIUS expands
 # $ENV{} natively, so they stay in the process environment and never touch
@@ -113,54 +112,24 @@ watch_certificates() {
 	done
 }
 
-# radiusd resolves a home server name once, at startup, and keeps that address
-# for the life of the process. The outpost is a Compose service name, and
-# Docker gives the container a new address whenever it alone is recreated (an
-# image update is enough), so radiusd would proxy to an address nobody answers
-# on until someone restarts it by hand.
-#
-# Resolve the name here instead and hand radiusd the address, so the watcher
-# below compares against exactly what radiusd is using.
-outpost_addresses() {
-	{ getent ahostsv4 "$OUTPOST_NAME" || getent ahosts "$OUTPOST_NAME"; } 2>/dev/null 		| awk '{print $1}' | sort -u
+# The outpost has a fixed address on the radius network (issue #15). A name is
+# refused: once its container is stopped, Docker forwards the name to the
+# host's resolver, which may answer with an address that is not ours -- and
+# radiusd would then proxy inner PAP requests to it.
+is_ipv4() {
+	case "$1" in
+		*'
+'*) return 1 ;;
+	esac
+	octet='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+	printf '%s\n' "$1" | grep -qxE "($octet\.){3}$octet"
 }
 
-watch_outpost_address() {
-	target_pid="$1"
-	while sleep "$OUTPOST_RESOLVE_INTERVAL"; do
-		current="$(outpost_addresses)"
-		# No answer means the outpost is down or mid-recreate. Restarting now
-		# would only fail to resolve at startup; wait for the name to return.
-		[ -n "$current" ] || continue
-		# Still listed: nothing moved. This also keeps a name with several
-		# addresses from restarting radiusd whenever the answer is reordered.
-		if printf '%s
-' "$current" | grep -qxF "$AUTHENTIK_RADIUS_HOST"; then
-			continue
-		fi
-		echo "entrypoint: outpost address changed, restarting radiusd" >&2
-		kill -TERM "$target_pid" 2>/dev/null || true
-		return 0
-	done
-}
+is_ipv4 "$AUTHENTIK_RADIUS_HOST" \
+	|| die "AUTHENTIK_RADIUS_HOST must be a literal IPv4 address (got '$AUTHENTIK_RADIUS_HOST') - give the outpost a fixed address, see docker-compose.yml"
 
-OUTPOST_NAME="$AUTHENTIK_RADIUS_HOST"
-OUTPOST_RESOLVE_INTERVAL="${OUTPOST_RESOLVE_INTERVAL:-15}"
-case "$OUTPOST_RESOLVE_INTERVAL" in
-	''|*[!0-9]*)
-		die "OUTPOST_RESOLVE_INTERVAL must be a number of seconds, 0 to disable (got '${OUTPOST_RESOLVE_INTERVAL}')"
-		;;
-esac
-
-AUTHENTIK_RADIUS_HOST="$(outpost_addresses | head -n 1)"
-[ -n "$AUTHENTIK_RADIUS_HOST" ] || die "cannot resolve AUTHENTIK_RADIUS_HOST '$OUTPOST_NAME'"
-export AUTHENTIK_RADIUS_HOST
-
-# A literal address resolves to itself and can never change.
-if [ "$OUTPOST_NAME" != "$AUTHENTIK_RADIUS_HOST" ] && [ "$OUTPOST_RESOLVE_INTERVAL" -gt 0 ]; then
-	echo "entrypoint: outpost '$OUTPOST_NAME' is at $AUTHENTIK_RADIUS_HOST, address watcher armed (interval ${OUTPOST_RESOLVE_INTERVAL}s)" >&2
-	# $$ is this shell, which exec below turns into the radiusd process.
-	watch_outpost_address "$$" &
+if [ -n "${OUTPOST_RESOLVE_INTERVAL:-}" ]; then
+	echo "entrypoint: OUTPOST_RESOLVE_INTERVAL has no effect any more - the outpost has a fixed address" >&2
 fi
 
 if [ "${CERT_RELOAD_WATCH:-false}" = "true" ]; then

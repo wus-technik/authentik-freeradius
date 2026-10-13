@@ -5,6 +5,10 @@
 #  Deployed as a Portainer git-backed stack: set the variables from
 #  .env.example in Portainer's stack environment section.
 #
+#  Both outposts sit on fixed addresses of the radius network (issue #15).
+#  Upgrading from a version without them: Compose recreates the network on
+#  the next deploy; see docs/troubleshooting.md if it does not.
+#
 #  No "version:" key -- it is obsolete in Compose v2 and only emits a warning.
 
 services:
@@ -21,7 +25,9 @@ services:
     #  retries, maintained upstream. Verified: it exits 1 while the outpost
     #  cannot reach authentik and its metrics port is closed, which is exactly
     #  the condition depends_on must wait through.
-    networks: [radius]
+    networks:
+      radius:
+        ipv4_address: ${AUTHENTIK_RADIUS_IP:-172.31.253.10}
     logging:
       driver: json-file
       options: {max-size: "10m", max-file: "3"}
@@ -33,7 +39,7 @@ services:
       authentik_radius:
         condition: service_healthy
     environment:
-      AUTHENTIK_RADIUS_HOST: authentik_radius
+      AUTHENTIK_RADIUS_HOST: ${AUTHENTIK_RADIUS_IP:-172.31.253.10}
       AUTHENTIK_RADIUS_SECRET: ${AUTHENTIK_RADIUS_SECRET:?set AUTHENTIK_RADIUS_SECRET}
       RADIUS_SECRET: ${RADIUS_SECRET:?set RADIUS_SECRET}
       RADIUS_CLIENT_NET: ${RADIUS_CLIENT_NET:?set RADIUS_CLIENT_NET to your AP subnet}
@@ -41,7 +47,6 @@ services:
       TLS_KEY_PATH: ${TLS_KEY_PATH:?set TLS_KEY_PATH}
       CERT_RELOAD_WATCH: ${CERT_RELOAD_WATCH:-false}
       CERT_RELOAD_INTERVAL: ${CERT_RELOAD_INTERVAL:-3600}
-      OUTPOST_RESOLVE_INTERVAL: ${OUTPOST_RESOLVE_INTERVAL:-15}
       VLAN_MAP: ${VLAN_MAP:-}
       FREERADIUS_ENABLE_DEBUG: ${FREERADIUS_ENABLE_DEBUG:-false}
     volumes:
@@ -67,3 +72,10 @@ services:
 networks:
   radius:
     driver: bridge
+    ipam:
+      config:
+        - subnet: ${RADIUS_NET_SUBNET:-172.31.253.0/24}
+          #  Docker hands out dynamic addresses (freeradius, a recreated
+          #  container) from this range only, so the fixed outpost addresses
+          #  below it are always free.
+          ip_range: ${RADIUS_NET_DYNAMIC:-172.31.253.128/25}

@@ -50,6 +50,8 @@ for development only.
    `LETSENCRYPT_DIR` is readable by Docker.
 4. Deploy, then follow [docs/authentik.md](docs/authentik.md) and
    [docs/unifi.md](docs/unifi.md).
+5. Leave `RADIUS_NET_SUBNET` at its default unless it collides with a network on the
+   host. Both outposts get fixed addresses inside it; nothing depends on DNS.
 
 Certificate renewals need `CERT_RELOAD_WATCH=true`: FreeRADIUS reads TLS material once at
 startup, so without it the container serves the old certificate until someone restarts it.

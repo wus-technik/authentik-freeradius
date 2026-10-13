@@ -248,7 +248,6 @@ The patterns worth alerting on come straight from [troubleshooting.md](troublesh
 | `Ignoring request .* from unknown client` | AP outside `RADIUS_CLIENT_NET` | Warning |
 | `entrypoint: ` | startup validation failed; the container is about to exit | High |
 | `certificate changed, restarting radiusd` | informational — confirms the renewal watcher fired | Information |
-| `outpost address changed, restarting radiusd` | informational — the outpost container was recreated and FreeRADIUS followed it | Information |
 
 The first deserves the highest severity in the set: it is unrecoverable without a restart.
 
