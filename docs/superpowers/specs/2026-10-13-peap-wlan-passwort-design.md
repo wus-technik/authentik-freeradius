@@ -1,8 +1,8 @@
 # Design: PEAP-MSCHAPv2 mit eigenem, generiertem WLAN-Passwort aus authentik
 
 Datum: 2026-10-13
-Status: Entwurf, Revision 3 nach Probe gegen echtes authentik (§ 11, § 13). Offen: § 11a
-Issue: #14 (Spike-Ergebnis dort). Bezug: #11, #7/#12 (für dieses Ziel zurückgestellt), #8
+Status: Revision 4, Entscheidungen vollständig, bereit für den Implementierungsplan
+Issues: #14 (Spike-Ergebnis dort), #15 (feste Adressen). Bezug: #11, #7/#12 (für dieses Ziel zurückgestellt), #8
 
 ## 1. Ziel
 
@@ -225,13 +225,44 @@ Geprüft (V3, V5):
 
 ## 6. Stack
 
+### 6.0 Netz und feste Adressen (#15, Voraussetzung)
+
+Entschieden in § 11a. Dieser Teil gilt auch ohne PEAP. Er schließt #15 und kommt im Plan
+**zuerst**, als eigener Commit.
+
+- Das Netz `radius` in `docker-compose.yml` bekommt ein festes IPAM-Subnetz
+  `${RADIUS_NET_SUBNET:-172.31.253.0/24}` und ein `ip_range`
+  `${RADIUS_NET_DYNAMIC:-172.31.253.128/25}`. Docker vergibt dynamische Adressen (etwa an
+  `freeradius`) nur aus diesem oberen Bereich, feste Adressen liegen darunter und können nicht
+  belegt sein.
+- `authentik_radius` bekommt `ipv4_address: ${AUTHENTIK_RADIUS_IP:-172.31.253.10}`, der
+  LDAP-Outpost später `${AUTHENTIK_LDAP_IP:-172.31.253.11}`.
+- `freeradius` bekommt `AUTHENTIK_RADIUS_HOST: ${AUTHENTIK_RADIUS_IP:-172.31.253.10}`.
+- `entrypoint.sh` verlangt für `AUTHENTIK_RADIUS_HOST` eine literale IPv4-Adresse und bricht
+  sonst mit Meldung ab. Auflösen und Adress-Watcher aus #5 entfallen. Ist
+  `OUTPOST_RESOLVE_INTERVAL` gesetzt, erscheint eine Warnung, dass die Variable keine Wirkung
+  mehr hat; sie verschwindet aus `.env.example` und `docker-compose.yml`.
+- **Umstieg einer bestehenden Installation:** Compose ändert die IPAM-Konfiguration eines
+  bestehenden Netzes nicht. Vor dem ersten Deploy mit dieser Version muss der Stack einmal
+  gestoppt und das alte Netz entfernt werden. Die Doku beschreibt das; das Changelog bzw. der
+  Commit nennt es ausdrücklich. Prüfpunkt im Plan: Was Portainer bei einem Redeploy über ein
+  bestehendes Netz mit anderer IPAM-Konfiguration meldet.
+- Das Subnetz darf mit keinem Netz am Host oder im LAN kollidieren. Deshalb ist es eine
+  Variable; `.env.example` erklärt das.
+- e2e: Die Stufe „Outpost auf neuer Adresse neu erzeugt“ (#5) wird zu „Outpost neu erzeugt,
+  behält seine Adresse, Authentifizierung geht ohne Neustart von radiusd weiter“. Dazu eine
+  Stufe, in der `AUTHENTIK_RADIUS_HOST` ein Name ist: Der Entrypoint bricht ab.
+- Doku: `troubleshooting.md` und `monitoring.md` verlieren die Zeile „outpost address changed,
+  restarting radiusd“.
+
 ### 6.1 Compose
 
 - Neue Datei `docker-compose.peap.yml`, in Portainer als zusätzliche Compose-Datei
   eingebunden. Sie fügt hinzu:
   - Dienst `authentik_ldap`, `ghcr.io/goauthentik/ldap:${AUTHENTIK_VERSION}`, eigener
-    Outpost-Token `AUTHENTIK_LDAP_TOKEN`, kein veröffentlichter Port, Netz `radius`. Der
-    eingebaute Healthcheck des Images bleibt, wie beim RADIUS-Outpost.
+    Outpost-Token `AUTHENTIK_LDAP_TOKEN`, kein veröffentlichter Port, Netz `radius` mit
+    `ipv4_address: ${AUTHENTIK_LDAP_IP:-172.31.253.11}`. Der eingebaute Healthcheck des Images
+    bleibt, wie beim RADIUS-Outpost.
   - für `freeradius`: die LDAP-Variablen und `PEAP_ENABLE=true`. **Kein**
     `depends_on: service_healthy` auf `authentik_ldap`: TTLS darf nicht auf LDAP warten. Ein
     PEAP-Login kurz nach dem Deploy scheitert, bis der LDAP-Outpost bereit ist.
@@ -242,7 +273,7 @@ Geprüft (V3, V5):
 | Variable | Pflicht bei PEAP | Bedeutung |
 |---|---|---|
 | `PEAP_ENABLE` | – | `true` schaltet PEAP ein. Standard `false`. |
-| `LDAP_HOST` | – | Standard `authentik_ldap` |
+| `LDAP_HOST` | – | Literale IPv4-Adresse des LDAP-Outposts; die Zusatzdatei setzt sie aus `AUTHENTIK_LDAP_IP`. Ein Name führt zum Abbruch (§ 6.0). |
 | `LDAP_PORT` | – | Standard `3389` (Klartext-Port des Outposts) |
 | `LDAP_BASE_DN` | ja | Base-DN des Providers, z. B. `dc=ldap,dc=goauthentik,dc=io` |
 | `LDAP_BIND_DN` | ja | DN des Servicekontos |
@@ -262,16 +293,10 @@ ist dasselbe: Wer den Host hat, sieht ohnehin alles. README und Doku sagen das.
   vor dem Escaping des Moduls). Ausgeschlossen sind damit `( ) * \ %`, Anführungszeichen,
   NUL und Zeilenumbrüche. authentik-Gruppennamen mit anderen Zeichen brauchen einen anderen
   Gruppennamen.
-- `LDAP_HOST` wird **nicht** beim Start aufgelöst und **nicht** überwacht. Der Watcher aus #5
-  existiert, weil radiusd die Adresse eines `home_server` einmal beim Start festlegt.
-  `rlm_ldap` gibt dagegen eine URI an libldap, das beim Verbindungsaufbau neu auflöst, und der
-  Pool verbindet nach Fehlern neu. Ein Watcher würde bei jeder Adressänderung des
-  LDAP-Outposts radiusd neu starten und damit TTLS-Sitzungen abreißen, ohne etwas zu gewinnen.
-  Geprüft: Nach Stopp und Neustart des Outposts geht PEAP ohne Neustart von radiusd wieder.
-- **Offen, Entscheidung nötig (§ 11a):** Ist der Outpost-Container gestoppt, kennt Dockers DNS
-  den Namen nicht mehr und fragt den DNS des Hosts. In der Probe kam dabei eine **öffentliche
-  Adresse** zurück, über eine Such-Domain mit Wildcard-Eintrag. Die Anfragen landen dann bei
-  einem fremden Host.
+- `LDAP_HOST` muss eine literale IPv4-Adresse sein, wie `AUTHENTIK_RADIUS_HOST` (§ 6.0). Es
+  gibt kein Auflösen und keinen Watcher. Der Pool verbindet nach Fehlern selbst neu. Geprüft:
+  Nach Stopp und Neustart des Outposts geht PEAP ohne Neustart von radiusd wieder, und bei
+  gestopptem Outpost endet eine PEAP-Anfrage über die IP nach etwa 2 s.
 - Schaltmechanismus nach dem Muster von `vlan-map.conf`: Das Skript schreibt drei Dateien
   unter `/run/radiusd/`. Bei `true` enthält jede ein `$INCLUDE` auf eine Datei im Image, bei
   `false` ist sie leer:
@@ -388,8 +413,9 @@ Weitere Stufen:
   geht weiter. Danach wieder gestartet: PEAP geht wieder.
 - **freeradius neu gestartet, während LDAP gestoppt ist**: radiusd kommt hoch, TTLS geht, PEAP
   wird abgelehnt.
-- LDAP-Stand-in neu erzeugt mit neuer Adresse: PEAP geht danach wieder, **ohne** dass radiusd
+- LDAP-Stand-in neu erzeugt (feste Adresse): PEAP geht danach wieder, **ohne** dass radiusd
   neu startet.
+- `LDAP_HOST` als Name: Der Entrypoint bricht ab.
 - Ein zweiter Durchlauf mit `PEAP_ENABLE=false` und ohne LDAP-Variablen: PEAP wird abgelehnt,
   TTLS läuft.
 - `radiusd -XC` in `validate` für beide Schalterstellungen.
@@ -445,8 +471,8 @@ Ergebnis kommt in `docs/clients.md`.
   offline (§ 5.3). Gegenmittel sind Schulung (angezeigter Zertifikatsname) und auf verwalteten
   Geräten trotzdem ein Profil. Restrisiko, dokumentiert.
 - **Klartext in der Session** bis zum Speichern bzw. bis zum Session-Ablauf (§ 5.2).
-- **Fremde Adresse für einen gestoppten Outpost** (§ 6.3, § 11a): LDAP-Bind-Token und
-  Anfragen könnten an einen fremden Host gehen.
+- **Fremde Adresse für einen gestoppten Outpost** (§ 11a): durch feste Adressen
+  ausgeschlossen (§ 6.0); DNS ist nicht mehr im Pfad.
 - **Event-Log**: Der Attributname enthält `password`, damit authentik den Wert in Diffs
   schwärzt. V4 und § 8.3 prüfen das.
 - **Andere Abflusswege des Hashes**: Admin-UI und -API sowie Blueprint-Exporte zeigen
@@ -472,7 +498,7 @@ Wegwerf-Setup, nichts davon im Repo.
 Dazu korrigiert die Probe § 6.4 an zwei Stellen (`Auth-Type inner-eap`, nacktes `mschap`) und
 findet § 11a.
 
-## 11a. Offen: gestoppter Outpost, fremde Adresse
+## 11a. Gestoppter Outpost, fremde Adresse (entschieden: feste Adressen)
 
 **Befund.** Ist ein Outpost-Container gestoppt, löst Dockers DNS seinen Namen nicht mehr selbst
 auf und leitet die Anfrage an den DNS des Hosts weiter. In der Probe kam so eine öffentliche
@@ -503,8 +529,8 @@ Folgen:
 3. **LDAPS mit Zertifikatsprüfung.** Schützt den Token, aber nicht den TTLS-Pfad, und braucht
    ein Zertifikat am Provider samt CA-Datei für FreeRADIUS.
 
-Die Entscheidung fällt vor dem Plan. Unabhängig davon gehört der TTLS-Teil in ein eigenes
-Issue, weil er schon heute gilt.
+**Entscheidung (Christian, 2026-10-13): Option 1, feste Adressen**, umgesetzt in § 6.0. Der
+TTLS-Teil ist als #15 erfasst, weil er schon heute gilt.
 
 ## 12. Standardwerte für den Blueprint-Kontext
 
@@ -551,3 +577,6 @@ die Spec verlangt jetzt ausdrücklich, dass der Filter dort steht.
 | Ohne Enterprise kein Event-Diff | § 5.2 präzisiert |
 | Gestoppter Outpost löst auf fremde Adresse auf, betrifft auch TTLS | § 11a, Entscheidung offen |
 
+**Revision 4, 2026-10-13.** § 11a entschieden: feste Adressen für beide Outposts (§ 6.0, #15).
+`LDAP_HOST` und `AUTHENTIK_RADIUS_HOST` müssen literale IPv4-Adressen sein; der Adress-Watcher
+aus #5 entfällt.
