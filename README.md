@@ -93,4 +93,3 @@ syntax check alone does **not** catch the failure modes that matter here.
 ## Not implemented
 
 - RADIUS accounting (UDP 1813) — #1
-- Dynamic VLAN per user/group — #2

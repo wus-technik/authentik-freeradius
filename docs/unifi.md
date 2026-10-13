@@ -14,7 +14,10 @@
 Leave the accounting server empty. This stack does not implement accounting; UniFi
 accounting records would time out.
 
-Do not enable **RADIUS Assigned VLAN** — dynamic VLAN is not implemented yet.
+**RADIUS Assigned VLAN** — enable it only once `VLAN_MAP` is set and the authentik mapping
+from [authentik.md § 5](authentik.md#5-dynamic-vlan-optional) is in place. Users without a
+mapped name then stay in the SSID's own VLAN. The uplink to each AP must carry every VLAN
+that `VLAN_MAP` can hand out, tagged, or those clients associate and get no DHCP lease.
 
 ## SSID
 

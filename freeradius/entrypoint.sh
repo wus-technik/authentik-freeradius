@@ -53,6 +53,46 @@ RADIUS_HEALTHCHECK_SECRET="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'
 export RADIUS_HEALTHCHECK_SECRET
 ( umask 077; printf '%s' "$RADIUS_HEALTHCHECK_SECRET" > /run/radiusd/healthcheck.secret )
 
+# VLAN_MAP="name=vlan-id ..." becomes a switch on the Filter-Id that an
+# authentik property mapping returns. Both halves are validated before they go
+# anywhere near unlang, so the generated file cannot carry anything else. An
+# unmapped name adds nothing: the client lands in the SSID's own VLAN.
+write_vlan_map() {
+	out=/run/radiusd/vlan-map.conf
+	map="$(printf '%s' "${VLAN_MAP:-}" | tr ',' ' ')"
+	if [ -z "$(printf '%s' "$map" | tr -d ' 	
+')" ]; then
+		: > "$out"
+		return 0
+	fi
+	body=""
+	for pair in $map; do
+		name="${pair%%=*}"
+		vlan="${pair#*=}"
+		printf '%s
+' "$name" | grep -qxE '[A-Za-z0-9._-]{1,64}' 			|| die "VLAN_MAP: '$pair' - the name must be 1-64 of A-Z a-z 0-9 . _ -"
+		case "$vlan" in
+			''|*[!0-9]*) die "VLAN_MAP: '$pair' - expected name=vlan-id" ;;
+		esac
+		[ "$vlan" -ge 1 ] && [ "$vlan" -le 4094 ] || die "VLAN_MAP: '$pair' - the VLAN id must be 1-4094"
+		body="$body$(printf '	case "%s" {
+		update reply {
+			&Tunnel-Type := VLAN
+			&Tunnel-Medium-Type := IEEE-802
+			&Tunnel-Private-Group-Id := "%s"
+		}
+	}' "$name" "$vlan")
+"
+	done
+	printf 'if (&reply:Filter-Id) {
+	switch &reply:Filter-Id {
+%s	}
+}
+' "$body" > "$out"
+	echo "entrypoint: dynamic VLAN enabled for $(grep -c 'case ' "$out") Filter-Id name(s)" >&2
+}
+write_vlan_map
+
 # Hash the resolved content rather than stat the path: certbot repoints the
 # live/ symlinks at new archive/ files, so mtime on the old inode never moves.
 cert_fingerprint() {

@@ -36,3 +36,37 @@ and let Compose own the container.
 The flow must complete without user interaction — no MFA prompt, no consent stage. RADIUS
 carries a username and a password and nothing else. A flow requiring anything more fails
 with `flow error` in the outpost log.
+
+## 5. Dynamic VLAN (optional)
+
+authentik cannot return the tunnel attributes a VLAN needs. Its bundled RADIUS dictionary
+does not contain them, and a mapping that sets `Tunnel-Private-Group-Id` fails with
+`Failed to evaluate property-mapping`
+([goauthentik/authentik#25284](https://github.com/goauthentik/authentik/issues/25284)). It
+can return `Filter-Id`, so authentik names a role and FreeRADIUS translates it:
+
+1. **Customization → Property Mappings → Create → RADIUS Provider Property Mapping**:
+
+   ```python
+   if ak_is_group_member(request.user, name="wlan-staff"):
+       packet["Filter-Id"] = "vlan-staff"
+   return packet
+   ```
+
+   Use the `packet[...] = ...` form. The `return {"Filter-Id": ...}` form from newer
+   authentik docs is silently ignored on 2026.8.
+
+2. Select the mapping on the RADIUS provider.
+3. Set `VLAN_MAP=vlan-staff=20` in the stack (several pairs: `vlan-staff=20,vlan-devices=30`)
+   and redeploy.
+4. Enable **RADIUS Assigned VLAN** in UniFi — see [unifi.md](unifi.md).
+
+FreeRADIUS sets `Tunnel-Type`, `Tunnel-Medium-Type` and `Tunnel-Private-Group-Id` for a
+name listed in `VLAN_MAP`. An unlisted name, or no `Filter-Id` at all, returns no tunnel
+attributes, so the client stays in the SSID's VLAN. `Filter-Id` itself is never forwarded
+to the access point.
+
+Several mappings that each set `Filter-Id` overwrite one another in name order. For a user
+in more than one WiFi group, decide the precedence inside a single mapping.
+
+Verified against authentik 2026.8.3 with the real RADIUS outpost.

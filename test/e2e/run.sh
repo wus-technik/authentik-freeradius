@@ -29,11 +29,38 @@ echo "== starting stack =="
 "${COMPOSE[@]}" up -d authentik_radius freeradius
 sleep 10
 
-echo "== 1/5 baseline authentication =="
+echo "== 1/6 baseline authentication =="
 auth || fail "baseline EAP-TTLS authentication did not succeed"
 echo "   ok"
 
-echo "== 2/5 outage: stopping the outpost =="
+echo "== 2/6 dynamic VLAN from Filter-Id =="
+# The stand-in returns Filter-Id the way an authentik property mapping does;
+# VLAN_MAP in docker-compose.test.yml maps vlan-staff to 20 (issue #10).
+reply() {
+	"${COMPOSE[@]}" run --rm --quiet-pull -e AUTH_USER="$1" -e AUTH_DUMP=1 client 2>/dev/null 		| sed -n '/code=2 (Access-Accept)/,/^[^ ]/p'
+}
+mapped="$(reply testuser)"
+[ -n "$mapped" ] || fail "no Access-Accept for testuser"
+printf '%s
+' "$mapped" | grep -A1 'Attribute 64 (Tunnel-Type)' | grep -q 'Value: 0000000d' 	|| fail "Tunnel-Type = VLAN missing from the outer Access-Accept"
+printf '%s
+' "$mapped" | grep -A1 'Attribute 65 (Tunnel-Medium-Type)' | grep -q 'Value: 00000006' 	|| fail "Tunnel-Medium-Type = IEEE-802 missing from the outer Access-Accept"
+printf '%s
+' "$mapped" | grep -A1 'Attribute 81 (Tunnel-Private-Group-Id)' | grep -q 'Value: 3230$' 	|| fail "Tunnel-Private-Group-Id = 20 missing from the outer Access-Accept"
+unmapped="$(reply otheruser)"
+[ -n "$unmapped" ] || fail "no Access-Accept for otheruser"
+if printf '%s
+' "$unmapped" | grep -q 'Attribute 81 '; then
+	fail "an unmapped Filter-Id name produced a VLAN; it must fall back to the SSID's VLAN"
+fi
+if printf '%s
+%s
+' "$mapped" "$unmapped" | grep -q 'Attribute 11 (Filter-Id)'; then
+	fail "Filter-Id leaked to the access point"
+fi
+echo "   ok"
+
+echo "== 3/6 outage: stopping the outpost =="
 "${COMPOSE[@]}" stop authentik_radius >/dev/null
 
 # The home server must actually reach the "dead" state before recovery is
@@ -54,7 +81,7 @@ echo "   home server is dead, as required"
 if auth; then fail "authentication succeeded while the outpost was stopped"; fi
 echo "   ok (correctly failing)"
 
-echo "== 3/5 recovery: restarting the outpost =="
+echo "== 4/6 recovery: restarting the outpost =="
 "${COMPOSE[@]}" start authentik_radius >/dev/null
 sleep "$REVIVE_WAIT"
 if ! auth; then
@@ -66,7 +93,7 @@ it can never revive, because the authentik outpost does not answer Status-Server
 fi
 echo "   ok"
 
-echo "== 4/5 outpost recreated alone, on a new address =="
+echo "== 5/6 outpost recreated alone, on a new address =="
 # Stage 3 restarts the stand-in in place, so it keeps its address. An image
 # update does not: the container is replaced and Docker hands out a new one,
 # while radiusd still holds the address it resolved at startup (issue #5).
@@ -95,7 +122,7 @@ done
 docker rm -f akfr-e2e-squatter >/dev/null 2>&1 || true
 echo "   ok"
 
-echo "== 5/5 container healthcheck =="
+echo "== 6/6 container healthcheck =="
 cid="$("${COMPOSE[@]}" ps -q freeradius)"
 [ -n "$cid" ] || fail "freeradius container is not running"
 # Stage 4 restarted radiusd, so the container may still be inside its start

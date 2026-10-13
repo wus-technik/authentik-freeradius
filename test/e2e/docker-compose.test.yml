@@ -33,6 +33,7 @@ services:
       TLS_CERT_PATH: /certs/server.crt
       TLS_KEY_PATH: /certs/server.key
       OUTPOST_RESOLVE_INTERVAL: 5
+      VLAN_MAP: vlan-staff=20
     volumes:
       - ./certs:/certs:ro
     networks: [e2e]

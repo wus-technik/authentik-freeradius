@@ -14,6 +14,16 @@ server proxy-inner-tunnel {
     }
 
     post-auth {
+        #  Dynamic VLAN. authentik cannot return the tunnel attributes -- its
+        #  bundled dictionary lacks them -- so a property mapping returns a
+        #  name in Filter-Id and VLAN_MAP turns that name into a VLAN here.
+        #  entrypoint.sh generates the included file from VLAN_MAP. Filter-Id
+        #  itself never reaches the access point.
+        $-INCLUDE ${run_dir}/vlan-map.conf
+        update reply {
+            &Filter-Id !* ANY
+        }
+
         eap
     }
 }
