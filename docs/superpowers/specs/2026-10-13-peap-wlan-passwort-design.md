@@ -487,7 +487,12 @@ Ergebnis kommt in `docs/clients.md`.
 - **Event-Log**: Der Attributname enthält `password`, damit authentik den Wert in Diffs
   schwärzt. V4 und § 8.3 prüfen das.
 - **Andere Abflusswege des Hashes**: Admin-UI und -API sowie Blueprint-Exporte zeigen
-  `attributes` vollständig. Der LDAP-Provider ist nur dem Servicekonto zugänglich (§ 5.5).
+  `attributes` vollständig. Auch LDAP liefert den Hash breiter als gedacht: authentik gibt
+  jedes Benutzerattribut als LDAP-Attribut aus, unabhängig vom Provider. Jeder bestehende
+  LDAP-Provider der Instanz (NAS, Nextcloud, …) reicht `wifi-password-nthash` an seine
+  suchberechtigten Konten („Search full LDAP directory“) weiter. Der eigene Provider
+  `wlan-ldap` ist daher keine Grenze (§ 5.5); vor dem Rollout bestehende LDAP-Provider und
+  ihre Servicekonten prüfen und das Recht nur vergeben, wo es nötig ist.
 - Der Token `LDAP_BIND_PASSWORD` steht wie die übrigen Secrets in der Compose-Umgebung.
 
 ## 11. Prüfergebnisse
@@ -613,3 +618,4 @@ deutsche Bedeutung.
 | authentik lehnt eine relative `meta_launch_url` ab („Enter a valid URL“) | Kontext-Schlüssel `authentik_url` (§ 5, § 12) |
 | Integrationstest scheiterte früh (403, `invalidation_flow` leer) | wartet vor dem Import auf authentiks eigene Blueprints; Abweisungen müssen ein Access-Reject mit dem richtigen Grund sein; Event-Log-Prüfung mit Positivkontrolle und Paginierung; Absenden ohne Bestätigung darf den gespeicherten Hash nicht ändern (§ 8.3) |
 | Veralteter Tab speicherte eine nie angezeigte Passphrase (gegen echtes authentik bestätigt) | Erzeugen nur beim Rendern (GET); POST ohne passenden Session-Wert ergibt `""`, die Policy lehnt als abgelaufen ab (§ 5.1) |
+| Abschluss-Review: Der Hash ist über jeden LDAP-Provider der Instanz lesbar, nicht nur über `wlan-ldap`; authentik liefert jedes Benutzerattribut als LDAP-Attribut | § 10 korrigiert: der eigene Provider ist keine Grenze; vor dem Rollout bestehende LDAP-Provider und ihre Servicekonten prüfen, „Search full LDAP directory“ nur wo nötig (auch `docs/authentik.md` § 6, README) |

@@ -123,6 +123,9 @@ valid token of `svc-wlan-ldap`, or the token expired.
 parentheses, non-ASCII) or is longer than 255 characters. Rename the group or user so its
 DN avoids them.
 
+**`<VAR> must be a single line`** — the same variables contain a line break, usually from a
+pasted value in the stack environment. Put the DN on one line.
+
 ## Debug logging
 
 ```bash

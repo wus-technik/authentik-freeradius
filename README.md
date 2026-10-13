@@ -44,8 +44,9 @@ publish the outpost's RADIUS port, and use long random shared secrets
   environment variables, so anyone with Docker socket or Portainer access can read them
   with `docker inspect` or Portainer's stack view.
 - **With PEAP, authentik stores an NT hash per user** (`wifi-password-nthash`). It is
-  equivalent to that user's WiFi password — not to their SSO password — and the LDAP
-  service account can read all of them.
+  equivalent to that user's WiFi password — not to their SSO password. The LDAP service
+  account can read all of them, and so can any account with "Search full LDAP directory"
+  on any other LDAP provider in the same authentik; audit those before rollout.
 
 `FREERADIUS_ENABLE_DEBUG=true` logs the inner tunnel, cleartext passwords included. It is
 for development only.
@@ -56,10 +57,10 @@ for development only.
 2. Fill in the stack environment variables from [`.env.example`](.env.example).
 3. Make sure the host has a certificate for the RADIUS server name and that
    `LETSENCRYPT_DIR` is readable by Docker.
-4. Deploy, then follow [docs/authentik.md](docs/authentik.md) and
-   [docs/unifi.md](docs/unifi.md).
-5. Leave `RADIUS_NET_SUBNET` at its default unless it collides with a network on the
+4. Leave `RADIUS_NET_SUBNET` at its default unless it collides with a network on the
    host. Both outposts get fixed addresses inside it; nothing depends on DNS.
+5. Deploy, then follow [docs/authentik.md](docs/authentik.md) and
+   [docs/unifi.md](docs/unifi.md).
 
 Certificate renewals need `CERT_RELOAD_WATCH=true`: FreeRADIUS reads TLS material once at
 startup, so without it the container serves the old certificate until someone restarts it.
@@ -83,7 +84,7 @@ the start in progress, not a failure — look again once the outpost reports hea
 
 - [docs/authentik.md](docs/authentik.md) — provider, outpost and token
 - [docs/unifi.md](docs/unifi.md) — RADIUS profile and SSID
-- [docs/clients.md](docs/clients.md) — Windows, Android, iOS, Linux
+- [docs/clients.md](docs/clients.md) — Windows, Android, iOS, macOS, Linux, and PEAP without a profile
 - [docs/troubleshooting.md](docs/troubleshooting.md) — when it does not work
 - [docs/certificates.md](docs/certificates.md) — issuing and rotating the server certificate
 - [docs/migration.md](docs/migration.md) — replacing an existing PEAP/MSCHAPv2 RADIUS

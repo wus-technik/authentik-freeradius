@@ -69,6 +69,9 @@ to the access point.
 Several mappings that each set `Filter-Id` overwrite one another in name order. For a user
 in more than one WiFi group, decide the precedence inside a single mapping.
 
+Dynamic VLAN applies to EAP-TTLS only. PEAP users (section 6) get no `Filter-Id` and no
+tunnel attributes and always stay in the SSID's VLAN.
+
 Verified against authentik 2026.8.3 with the real RADIUS outpost.
 
 ## 6. WiFi password for PEAP (optional)
@@ -116,14 +119,21 @@ The blueprint does not create these:
 6. Deploy with [`docker-compose.peap.yml`](../docker-compose.peap.yml) as an additional
    Compose file and set the `LDAP_*` variables from `.env.example`.
 
-The DNs in `LDAP_BASE_DN`, `LDAP_BIND_DN` and `LDAP_WLAN_GROUP_DN` must be 1-255 characters
-of `A-Z a-z 0-9 = , . _ -` and spaces. The container refuses to start otherwise
-(`<VAR> may only contain A-Z a-z 0-9 = , . _ - and spaces`); `+`, `#`, parentheses and
-non-ASCII characters are not accepted, so a group whose DN needs them must be renamed.
+The DNs in `LDAP_BASE_DN`, `LDAP_BIND_DN` and `LDAP_WLAN_GROUP_DN` must be a single line of
+1-255 characters of `A-Z a-z 0-9 = , . _ -` and spaces. The container refuses to start
+otherwise (`<VAR> must be a single line` for a line break, `<VAR> may only contain A-Z a-z
+0-9 = , . _ - and spaces` for anything else); `+`, `#`, parentheses and non-ASCII
+characters are not accepted, so a group whose DN needs them must be renamed.
 
-**This provider hands out NT hashes.** Do not attach it to any other application, and keep
-the group `wlan-ldap-search` to the service account. Rotating the token: create a new one
-for `svc-wlan-ldap`, update `LDAP_BIND_PASSWORD`, redeploy, delete the old token.
+**The NT hashes are readable over LDAP.** This provider is not the boundary: authentik
+exposes every user attribute as an LDAP attribute, so every LDAP provider in this authentik
+hands out `wifi-password-nthash` to its search-permitted accounts. Keep the group
+`wlan-ldap-search` to the service account, and do not attach this provider to any other
+application. Rotating the token: create a new one for `svc-wlan-ldap`, update
+`LDAP_BIND_PASSWORD`, redeploy, delete the old token.
+
+PEAP users are not placed in a VLAN: `VLAN_MAP` (section 5) applies to EAP-TTLS only, and
+PEAP users stay in the SSID's VLAN.
 
 ### What users and the helpdesk do
 
@@ -145,6 +155,10 @@ for `svc-wlan-ldap`, update `LDAP_BIND_PASSWORD`, redeploy, delete the old token
 - The NT hash is equivalent to the WiFi password: anyone with the authentik database, an
   admin account or the service account token has WiFi access for every user — not their
   SSO account.
+- Every LDAP provider in this authentik exposes `wifi-password-nthash` to the accounts that
+  may search it, whatever the provider is for. Before rollout, audit the existing LDAP
+  providers (NAS, Nextcloud and the like) and their service accounts, and do not give
+  "Search full LDAP directory" to an account that does not need it.
 - Without a profile users confirm the server certificate by tapping. A fake access point
   can record the exchange and recover the NT hash offline (about 2^56 DES operations).
   Tell users the certificate name; managed devices should still get a profile.

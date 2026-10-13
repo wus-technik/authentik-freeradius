@@ -1,6 +1,7 @@
 # Client configuration
 
-All clients use **EAP-TTLS** with **PAP** as the inner method, except the profile-free PEAP option below.
+All clients use **EAP-TTLS** with **PAP** as the inner method, except the profile-free PEAP
+option below.
 
 ## PEAP without a profile (WiFi password)
 
