@@ -166,7 +166,13 @@ if peap peapuser wrong-password; then fail "PEAP accepted a wrong password"; fi
 for u in peapinactive peapnogroup peapnohash; do
 	if peap "$u" e2e-peap-pw; then fail "PEAP accepted $u, who must be refused"; fi
 done
-"${COMPOSE[@]}" logs freeradius 2>&1 	| grep -q 'peap: no active WLAN user with a WiFi password: peapinactive' 	|| fail "no log line for the refused PEAP login of peapinactive"
+# Each refusal must come from the directory filter, not from a later failure.
+# The line ends with the user name, so anchor on it: no user matches another's line.
+peap_log="$("${COMPOSE[@]}" logs freeradius 2>&1)"
+for u in peapinactive peapnogroup peapnohash; do
+	printf '%s\n' "$peap_log" | grep -q "peap: no active WLAN user with a WiFi password: $u\$" \
+		|| fail "no log line for the refused PEAP login of $u"
+done
 # User-Name goes into an LDAP filter; metacharacters must not widen it.
 for u in '*' 'peapuser)(cn=*' 'peap*'; do
 	if peap "$u" e2e-peap-pw; then fail "PEAP accepted the user name '$u'"; fi
