@@ -66,7 +66,10 @@ Drei Teile mit je einer Aufgabe:
 
 ## 5. authentik
 
-Alles in diesem Abschnitt liefert ein Blueprint `authentik/blueprints/wlan-passwort.yaml`.
+Ein Blueprint `authentik/blueprints/wlan-passwort.yaml` liefert Flow, Prompts, Policy,
+Anwendung, Gruppen, Bind-Flow und LDAP-Provider. Von Hand angelegt werden das Servicekonto,
+seine Suchberechtigung und der LDAP-Outpost; die Doku beschreibt die Schritte. Der Blueprint
+entsteht aus Quelldateien unter `authentik/src/`, damit die Expressions testbar sind.
 Die Werte, die pro Installation abweichen (Gruppenname, Servername des Zertifikats, SSID),
 kommen als Blueprint-Kontext; Standardwerte stehen in § 12.
 
@@ -213,8 +216,8 @@ DES-Weg bleibt. Gegen den DES-Weg hilft nur, dass Nutzer das Zertifikat prüfen 
   Ein abgelaufener Token würde PEAP leise abschalten. Rotation ist ein dokumentierter,
   manueller Schritt; ein fehlschlagender Bind erzeugt eine eigene Log-Zeile (§ 9), die das
   Monitoring auswertet.
-- Die Anwendung des Providers ist nur an das Servicekonto gebunden; normale Nutzer können sich
-  dort nicht binden.
+- Die Anwendung des Providers ist an die Gruppe `wlan-ldap-search` gebunden, in der nur das
+  Servicekonto ist; normale Nutzer können sich dort nicht binden.
 
 Geprüft (V3, V5):
 - Der Token-Bind über den Bind-Flow funktioniert.
@@ -242,11 +245,11 @@ Entschieden in § 11a. Dieser Teil gilt auch ohne PEAP. Er schließt #15 und kom
   sonst mit Meldung ab. Auflösen und Adress-Watcher aus #5 entfallen. Ist
   `OUTPOST_RESOLVE_INTERVAL` gesetzt, erscheint eine Warnung, dass die Variable keine Wirkung
   mehr hat; sie verschwindet aus `.env.example` und `docker-compose.yml`.
-- **Umstieg einer bestehenden Installation:** Compose ändert die IPAM-Konfiguration eines
-  bestehenden Netzes nicht. Vor dem ersten Deploy mit dieser Version muss der Stack einmal
-  gestoppt und das alte Netz entfernt werden. Die Doku beschreibt das; das Changelog bzw. der
-  Commit nennt es ausdrücklich. Prüfpunkt im Plan: Was Portainer bei einem Redeploy über ein
-  bestehendes Netz mit anderer IPAM-Konfiguration meldet.
+- **Umstieg einer bestehenden Installation:** Geprüft mit Compose 5.5.1: Compose erkennt die
+  geänderte Netz-Konfiguration, legt das Netz neu an und erzeugt die Container neu; der
+  Outpost landet auf seiner festen Adresse. Für ältere Compose-Versionen, auch die in
+  Portainer gebündelte, nennt die Doku den Ausweg: Stack stoppen, altes Netz entfernen, neu
+  deployen.
 - Das Subnetz darf mit keinem Netz am Host oder im LAN kollidieren. Deshalb ist es eine
   Variable; `.env.example` erklärt das.
 - e2e: Die Stufe „Outpost auf neuer Adresse neu erzeugt“ (#5) wird zu „Outpost neu erzeugt,
@@ -303,7 +306,7 @@ ist dasselbe: Wer den Host hat, sieht ohnehin alles. README und Doku sagen das.
 
   | Datei | eingebunden in | enthält bei `true` |
   |---|---|---|
-  | `peap-modules.conf` | `radiusd.conf`, Block `modules {}` | `ldap`, `mschap`, `inner-eap` aus `/etc/raddb/peap/` |
+  | `peap-modules.conf` | `radiusd.conf`, Block `modules {}` | `ldap`, `inner-eap`, `linelog` aus `/etc/raddb/peap/`; `mschap` und `pap` sind im Basis-Image schon aktiv |
   | `peap-eap.conf` | `mods/eap`, Block `eap {}` | den `peap {}`-Block |
   | `peap-site.conf` | `radiusd.conf`, nach `sites-enabled/` | den Server `peap-inner-tunnel` |
 
@@ -580,3 +583,8 @@ die Spec verlangt jetzt ausdrücklich, dass der Filter dort steht.
 **Revision 4, 2026-10-13.** § 11a entschieden: feste Adressen für beide Outposts (§ 6.0, #15).
 `LDAP_HOST` und `AUTHENTIK_RADIUS_HOST` müssen literale IPv4-Adressen sein; der Adress-Watcher
 aus #5 entfällt.
+
+Nachtrag beim Schreiben des Plans: Umstieg mit aktuellem Compose geprüft (§ 6.0), Inhalt von
+`peap-modules.conf` (§ 6.3), Umfang des Blueprints und Gruppe `wlan-ldap-search` (§ 5).
+Die Log-Zeilen sind Englisch wie alle Logs des Stacks; die in § 9 genannten Texte sind ihre
+deutsche Bedeutung.
