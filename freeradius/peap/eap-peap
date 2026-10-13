@@ -1,0 +1,11 @@
+#  Pulled into the eap module by entrypoint.sh when PEAP_ENABLE=true.
+peap {
+	tls = tls-common
+	default_eap_type = mschapv2
+	#  Nothing from inside the tunnel reaches the access point: no
+	#  MS-CHAP2-Success, no attribute an inner module might add.
+	copy_request_to_tunnel = no
+	use_tunneled_reply = no
+	proxy_tunneled_request_as_eap = no
+	virtual_server = "peap-inner-tunnel"
+}

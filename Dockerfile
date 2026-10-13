@@ -13,6 +13,7 @@ COPY freeradius/mods/eap /etc/raddb/mods-available/eap
 COPY freeradius/sites/site /etc/raddb/sites-available/site
 COPY freeradius/sites/proxy-inner-tunnel /etc/raddb/sites-available/proxy-inner-tunnel
 COPY freeradius/sites/status /etc/raddb/sites-available/status
+COPY freeradius/peap/ /etc/raddb/peap/
 COPY freeradius/entrypoint.sh /entrypoint.sh
 COPY freeradius/healthcheck.sh /healthcheck.sh
 

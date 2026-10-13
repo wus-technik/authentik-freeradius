@@ -1,0 +1,40 @@
+#  The authentik LDAP outpost, for PEAP-MSCHAPv2 (issue #14). Included only
+#  when PEAP_ENABLE=true; see write_peap_includes in entrypoint.sh.
+ldap {
+	server = "$ENV{LDAP_HOST}"
+	port = "$ENV{LDAP_PORT}"
+	identity = "$ENV{LDAP_BIND_DN}"
+	password = "$ENV{LDAP_BIND_PASSWORD}"
+	base_dn = "$ENV{LDAP_BASE_DN}"
+
+	#  32 hex characters. The pap call in peap-inner-tunnel turns them into
+	#  the 16 bytes mschap expects; without it mschap rejects every password.
+	update {
+		control:NT-Password := 'wifi-password-nthash'
+	}
+
+	#  One filter decides everything: active, in the WLAN group, has a WiFi
+	#  password. rlm_ldap escapes User-Name here; the group DN is inserted at
+	#  parse time and is restricted to safe characters by entrypoint.sh.
+	user {
+		base_dn = "${..base_dn}"
+		filter = "(&(cn=%{User-Name})(ak-active=TRUE)(memberOf=$ENV{LDAP_WLAN_GROUP_DN})(wifi-password-nthash=*))"
+	}
+
+	options {
+		chase_referrals = no
+		net_timeout = 3
+		timeout = 3
+		res_timeout = 3
+	}
+
+	#  start = 0: radiusd must come up, and keep serving EAP-TTLS, while the
+	#  LDAP outpost is down. The pool reconnects on its own.
+	pool {
+		start = 0
+		min = 0
+		max = 8
+		idle_timeout = 60
+		lifetime = 300
+	}
+}

@@ -79,6 +79,30 @@ jobs:
           grep -q 'Configuration appears to be OK' radiusd.log
           ! grep -qiE 'no longer necessary|Failed resolving' radiusd.log
 
+      - name: Check the FreeRADIUS configuration with PEAP enabled
+        run: |
+          #  Through the entrypoint this time: it validates the PEAP variables
+          #  and writes the include files the configuration pulls in.
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD/cert.pem:/certs/cert.pem:ro" \
+            -v "$PWD/key.pem:/certs/key.pem:ro" \
+            -e RADIUS_CLIENT_NET=10.0.0.0/8 \
+            -e RADIUS_SECRET='se/cret&with\weird$chars' \
+            -e AUTHENTIK_RADIUS_HOST=127.0.0.1 \
+            -e AUTHENTIK_RADIUS_SECRET='an/other&secret-for-ci' \
+            -e TLS_CERT_PATH=/certs/cert.pem \
+            -e TLS_KEY_PATH=/certs/key.pem \
+            -e PEAP_ENABLE=true \
+            -e LDAP_HOST=127.0.0.1 \
+            -e LDAP_BASE_DN=dc=ldap,dc=goauthentik,dc=io \
+            -e LDAP_BIND_DN=cn=svc-wlan-ldap,ou=users,dc=ldap,dc=goauthentik,dc=io \
+            -e LDAP_BIND_PASSWORD='tok/en&with\weird$chars' \
+            -e LDAP_WLAN_GROUP_DN=cn=wlan,ou=groups,dc=ldap,dc=goauthentik,dc=io \
+            akfr:ci -XC 2>&1 | tee radiusd-peap.log
+          grep -q 'Configuration appears to be OK' radiusd-peap.log
+          grep -q 'peap-inner-tunnel' radiusd-peap.log
+
   e2e:
     #  The behavioural gate. Catches faults radiusd -XC cannot see.
     runs-on: ubuntu-latest

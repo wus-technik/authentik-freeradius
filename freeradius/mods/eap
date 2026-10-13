@@ -59,4 +59,7 @@ eap {
 		include_length = yes
 		virtual_server = "proxy-inner-tunnel"
 	}
+
+	#  The peap {} block, or nothing; written by entrypoint.sh.
+	$-INCLUDE ${run_dir}/peap-eap.conf
 }

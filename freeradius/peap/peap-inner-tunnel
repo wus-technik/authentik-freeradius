@@ -1,0 +1,29 @@
+#  PEAP-MSCHAPv2: the NT hash comes from authentik via the LDAP outpost.
+#  Verified against authentik 2026.8.3 (spec 6.4).
+server peap-inner-tunnel {
+	authorize {
+		#  The EAP-Identity round needs nothing else.
+		inner-eap {
+			ok = return
+		}
+		#  notfound: inactive, not in the WLAN group, or no WiFi password.
+		#  fail (LDAP unreachable) already ends in a reject.
+		ldap
+		if (notfound) {
+			peap_log_notfound
+			reject
+		}
+		pap
+	}
+
+	authenticate {
+		#  The instance name is the Auth-Type; "Auth-Type eap" makes radiusd
+		#  refuse to start.
+		Auth-Type inner-eap {
+			inner-eap
+		}
+		#  eap_mschapv2 calls "Auth-Type mschap", which only a bare mschap
+		#  creates. "Auth-Type MS-CHAP" alone rejects every password.
+		mschap
+	}
+}

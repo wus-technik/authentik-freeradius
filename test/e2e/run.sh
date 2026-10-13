@@ -145,6 +145,34 @@ echo "== configuration the entrypoint must refuse =="
 rejects "AUTHENTIK_RADIUS_HOST must be a literal IPv4 address" AUTHENTIK_RADIUS_HOST=authentik_radius
 rejects "AUTHENTIK_RADIUS_HOST must be a literal IPv4 address" AUTHENTIK_RADIUS_HOST=172.28.0.010
 rejects "AUTHENTIK_RADIUS_HOST must be a literal IPv4 address" AUTHENTIK_RADIUS_HOST=172.28.0.256
+peap_on=(PEAP_ENABLE=true LDAP_HOST=172.28.0.11
+	"LDAP_BASE_DN=dc=ldap,dc=goauthentik,dc=io"
+	"LDAP_BIND_DN=cn=svc-wlan-ldap,ou=users,dc=ldap,dc=goauthentik,dc=io"
+	LDAP_BIND_PASSWORD=e2e-ldap-bind-not-a-real-one
+	"LDAP_WLAN_GROUP_DN=cn=wlan,ou=groups,dc=ldap,dc=goauthentik,dc=io")
+rejects "PEAP_ENABLE must be true or false" PEAP_ENABLE=yes
+rejects "PEAP_ENABLE=true requires LDAP_BIND_PASSWORD" "${peap_on[@]}" LDAP_BIND_PASSWORD=
+rejects "LDAP_HOST must be a literal IPv4 address" "${peap_on[@]}" LDAP_HOST=authentik_ldap
+rejects "LDAP_WLAN_GROUP_DN may only contain" "${peap_on[@]}" "LDAP_WLAN_GROUP_DN=cn=wlan(x),ou=groups,dc=ldap,dc=goauthentik,dc=io"
+rejects "LDAP_BASE_DN may only contain" "${peap_on[@]}" "LDAP_BASE_DN=dc=%{User-Name},dc=io"
+rejects "LDAP_PORT must be a port number" "${peap_on[@]}" LDAP_PORT=3389x
+echo "   ok"
+
+echo "== PEAP switched off =="
+# A dedicated container with PEAP_ENABLE=false and no LDAP variables at all:
+# PEAP must be refused, EAP-TTLS must work as before (spec 8.1).
+"${COMPOSE[@]}" run -d --no-deps --name akfr-e2e-nopeap \
+	-e PEAP_ENABLE=false -e LDAP_HOST= -e LDAP_BASE_DN= -e LDAP_BIND_DN= \
+	-e LDAP_BIND_PASSWORD= -e LDAP_WLAN_GROUP_DN= freeradius >/dev/null
+deadline=$(( $(date +%s) + 60 ))
+until auth -e AUTH_TARGET=akfr-e2e-nopeap; do
+	[ "$(date +%s)" -lt "$deadline" ] || fail "EAP-TTLS failed against the container with PEAP switched off"
+	sleep 3
+done
+if auth -e AUTH_TARGET=akfr-e2e-nopeap -e AUTH_METHOD=peap; then
+	fail "PEAP succeeded with PEAP_ENABLE=false"
+fi
+docker rm -f akfr-e2e-nopeap >/dev/null
 echo "   ok"
 
 echo "== container healthcheck =="

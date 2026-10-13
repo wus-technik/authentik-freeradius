@@ -132,6 +132,60 @@ if [ -n "${OUTPOST_RESOLVE_INTERVAL:-}" ]; then
 	echo "entrypoint: OUTPOST_RESOLVE_INTERVAL has no effect any more - the outpost has a fixed address" >&2
 fi
 
+# PEAP_ENABLE=true adds PEAP-MSCHAPv2 against the authentik LDAP outpost
+# (issue #14). The modules live in /etc/raddb/peap/, outside mods-enabled/,
+# so with PEAP off ldap is never instantiated; these includes are the switch.
+write_peap_includes() {
+	modules=/run/radiusd/peap-modules.conf
+	eap=/run/radiusd/peap-eap.conf
+	site=/run/radiusd/peap-site.conf
+	case "${PEAP_ENABLE:-false}" in
+		false)
+			: > "$modules"
+			: > "$eap"
+			: > "$site"
+			return 0
+			;;
+		true) ;;
+		*) die "PEAP_ENABLE must be true or false (got '${PEAP_ENABLE}')" ;;
+	esac
+
+	for var in LDAP_HOST LDAP_BASE_DN LDAP_BIND_DN LDAP_BIND_PASSWORD LDAP_WLAN_GROUP_DN; do
+		eval "value=\${$var:-}"
+		[ -n "$value" ] || die "PEAP_ENABLE=true requires $var"
+	done
+	# shellcheck disable=SC2153 # LDAP_HOST is checked by the loop above
+	is_ipv4 "$LDAP_HOST" \
+		|| die "LDAP_HOST must be a literal IPv4 address (got '$LDAP_HOST') - give the LDAP outpost a fixed address"
+
+	# The DNs go into the configuration and the LDAP filter at parse time,
+	# before rlm_ldap escapes anything, so only harmless characters pass.
+	for var in LDAP_BASE_DN LDAP_BIND_DN LDAP_WLAN_GROUP_DN; do
+		eval "value=\${$var}"
+		case "$value" in
+			*'
+'*) die "$var must be a single line" ;;
+		esac
+		printf '%s\n' "$value" | grep -qxE '[A-Za-z0-9=,._ -]{1,255}' \
+			|| die "$var may only contain A-Z a-z 0-9 = , . _ - and spaces (got '$value')"
+	done
+
+	LDAP_PORT="${LDAP_PORT:-3389}"
+	case "$LDAP_PORT" in
+		''|*[!0-9]*) die "LDAP_PORT must be a port number (got '$LDAP_PORT')" ;;
+	esac
+	export LDAP_PORT
+
+	# shellcheck disable=SC2016 # literal FreeRADIUS directive
+	printf '$INCLUDE /etc/raddb/peap/ldap\n$INCLUDE /etc/raddb/peap/inner-eap\n$INCLUDE /etc/raddb/peap/linelog\n' > "$modules"
+	# shellcheck disable=SC2016 # literal FreeRADIUS directive
+	printf '$INCLUDE /etc/raddb/peap/eap-peap\n' > "$eap"
+	# shellcheck disable=SC2016 # literal FreeRADIUS directive
+	printf '$INCLUDE /etc/raddb/peap/peap-inner-tunnel\n' > "$site"
+	echo "entrypoint: PEAP-MSCHAPv2 enabled, LDAP outpost at $LDAP_HOST:$LDAP_PORT" >&2
+}
+write_peap_includes
+
 if [ "${CERT_RELOAD_WATCH:-false}" = "true" ]; then
 	case "${CERT_RELOAD_INTERVAL:-3600}" in
 		''|*[!0-9]*)

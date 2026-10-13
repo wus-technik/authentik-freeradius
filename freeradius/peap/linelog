@@ -1,0 +1,6 @@
+#  The log line for a PEAP login the directory refused. Without it a
+#  deactivated user and a typo look the same in the log.
+linelog peap_log_notfound {
+	filename = /dev/stdout
+	format = "peap: no active WLAN user with a WiFi password: %{User-Name}"
+}
