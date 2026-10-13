@@ -133,7 +133,9 @@ for `svc-wlan-ldap`, update `LDAP_BIND_PASSWORD`, redeploy, delete the old token
   a password was already saved, is refused with "Das WLAN-Passwort ist abgelaufen. Bitte
   lade die Seite neu." Reloading the page shows a new password; nothing is saved from the
   stale page.
-- **Helpdesk:** cannot see or set a WiFi password. Deleting the attribute
+- **Helpdesk:** cannot read a WiFi password back, because the passphrase itself is never
+  stored. The hash is a plain user attribute, though: anyone who may edit user attributes
+  can replace it, and the blueprint does not restrict that. Deleting
   `wifi-password-nthash` on the user locks WiFi until the user fetches a new one.
 - **Leavers:** deactivating the user, or removing them from `wlan`, refuses the next
   login. No cache is involved: the provider runs in `direct` mode.
