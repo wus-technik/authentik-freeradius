@@ -9,3 +9,5 @@ Dockerfile      text eol=lf
 *.conf          text eol=lf
 .env.example    text eol=lf
 freeradius/**   text eol=lf
+authentik/**    text eol=lf
+test/authentik/** text eol=lf

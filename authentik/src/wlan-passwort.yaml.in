@@ -1,0 +1,190 @@
+# authentik blueprint for the WiFi password (authentik-freeradius, issue #14).
+# GENERATED from authentik/src/ by authentik/build_blueprint.py -- edit the
+# sources, then run: python3 authentik/build_blueprint.py
+#
+# Not covered here, see docs/authentik.md section 6: the service account
+# svc-wlan-ldap, its search permission, and the LDAP outpost.
+version: 1
+metadata:
+  name: authentik-freeradius WLAN-Passwort
+  labels:
+    blueprints.goauthentik.io/instantiate: "false"
+context:
+  wlan_group: wlan
+  ldap_search_group: wlan-ldap-search
+  ssid: WLAN
+  radius_server_name: radius.example.com
+  ldap_base_dn: dc=ldap,dc=goauthentik,dc=io
+entries:
+  # Groups are only created, never changed: an existing WLAN group keeps its
+  # members and settings.
+  - model: authentik_core.group
+    state: created
+    identifiers:
+      name: !Context wlan_group
+  - model: authentik_core.group
+    state: created
+    identifiers:
+      name: !Context ldap_search_group
+
+  # --- WiFi password flow (spec 5.1) --------------------------------------
+  - model: authentik_policies_expression.expressionpolicy
+    id: policy-save
+    identifiers:
+      name: wlan-passwort-speichern
+    attrs:
+      expression: |
+@SAVE@
+  - model: authentik_stages_prompt.prompt
+    id: prompt-password
+    identifiers:
+      name: wlan-passwort-feld
+    attrs:
+      field_key: wifi_password
+      label: Dein WLAN-Passwort
+      type: text_read_only
+      required: false
+      order: 0
+      initial_value_expression: true
+      initial_value: |
+@GENERATE@
+  - model: authentik_stages_prompt.prompt
+    id: prompt-info
+    identifiers:
+      name: wlan-passwort-info
+    attrs:
+      field_key: wifi_info
+      label: So verbindest du dich
+      type: static
+      required: false
+      order: 1
+      initial_value: !Format
+        - "WLAN: %s. Benutzername: dein authentik-Benutzername. Beim ersten Verbinden fragt das Gerät nach einem Zertifikat: bestätige es nur, wenn es auf %s lautet. Das Passwort wird nur jetzt angezeigt."
+        - !Context ssid
+        - !Context radius_server_name
+  - model: authentik_stages_prompt.prompt
+    id: prompt-ack
+    identifiers:
+      name: wlan-passwort-bestaetigung
+    attrs:
+      field_key: wifi_ack
+      label: Ich habe das Passwort notiert. Mein bisheriges WLAN-Passwort wird damit ungültig.
+      type: checkbox
+      required: true
+      order: 2
+  - model: authentik_stages_prompt.promptstage
+    id: stage-prompt
+    identifiers:
+      name: wlan-passwort-anzeige
+    attrs:
+      fields:
+        - !KeyOf prompt-password
+        - !KeyOf prompt-info
+        - !KeyOf prompt-ack
+      validation_policies:
+        - !KeyOf policy-save
+  - model: authentik_flows.flow
+    id: flow-wlan
+    identifiers:
+      slug: wlan-passwort
+    attrs:
+      name: WLAN-Passwort
+      title: WLAN-Passwort
+      designation: stage_configuration
+      authentication: require_authenticated
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf flow-wlan
+      order: 0
+    attrs:
+      group: !Find [authentik_core.group, [name, !Context wlan_group]]
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-wlan
+      stage: !KeyOf stage-prompt
+      order: 10
+
+  # --- Portal tile (spec 5.4) ----------------------------------------------
+  - model: authentik_core.application
+    id: app-wlan
+    identifiers:
+      slug: wlan-zugang
+    attrs:
+      name: WLAN-Zugang
+      meta_launch_url: /if/flow/wlan-passwort/
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf app-wlan
+      order: 0
+    attrs:
+      group: !Find [authentik_core.group, [name, !Context wlan_group]]
+
+  # --- LDAP for FreeRADIUS (spec 5.5) --------------------------------------
+  - model: authentik_stages_identification.identificationstage
+    id: ldap-ident
+    identifiers:
+      name: wlan-ldap-identification
+    attrs:
+      user_fields: [username]
+  - model: authentik_stages_password.passwordstage
+    id: ldap-password
+    identifiers:
+      name: wlan-ldap-password
+    attrs:
+      # The service account binds with its app-password token.
+      backends:
+        - authentik.core.auth.InbuiltBackend
+        - authentik.core.auth.TokenBackend
+  - model: authentik_stages_user_login.userloginstage
+    id: ldap-login
+    identifiers:
+      name: wlan-ldap-login
+  - model: authentik_flows.flow
+    id: flow-ldap-bind
+    identifiers:
+      slug: wlan-ldap-bind
+    attrs:
+      name: WLAN LDAP bind
+      title: WLAN LDAP bind
+      designation: authentication
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-ldap-bind
+      stage: !KeyOf ldap-ident
+      order: 10
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-ldap-bind
+      stage: !KeyOf ldap-password
+      order: 20
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-ldap-bind
+      stage: !KeyOf ldap-login
+      order: 30
+  - model: authentik_providers_ldap.ldapprovider
+    id: provider-ldap
+    identifiers:
+      name: wlan-ldap
+    attrs:
+      authorization_flow: !KeyOf flow-ldap-bind
+      invalidation_flow: !Find [authentik_flows.flow, [slug, default-invalidation-flow]]
+      base_dn: !Context ldap_base_dn
+      # direct: a deactivation or group change applies to the next login.
+      search_mode: direct
+      bind_mode: direct
+  - model: authentik_core.application
+    id: app-ldap
+    identifiers:
+      slug: wlan-ldap
+    attrs:
+      name: wlan-ldap
+      provider: !KeyOf provider-ldap
+  # Only members of this group may bind. Nobody is in it until the service
+  # account is added; this provider hands out NT hashes.
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf app-ldap
+      order: 0
+    attrs:
+      group: !Find [authentik_core.group, [name, !Context ldap_search_group]]

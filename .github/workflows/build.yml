@@ -56,6 +56,17 @@ jobs:
             exit 1
           fi
 
+  blueprint:
+    #  The authentik expressions: MD4, passphrase, save policy. And that the
+    #  committed blueprint matches its sources.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Unit-test the expressions
+        run: python3 -I -m unittest discover -s test/authentik -p 'test_*.py' -v
+      - name: Check the blueprint is generated from its sources
+        run: python3 -I authentik/build_blueprint.py --check
+
   validate:
     #  Configuration syntax gate. Necessary but NOT sufficient -- radiusd -XC
     #  happily accepts a status_check setting that permanently breaks
@@ -130,7 +141,7 @@ jobs:
         run: ./test/e2e/run.sh
 
   build:
-    needs: [lint, validate, e2e]
+    needs: [lint, validate, e2e, blueprint]
     runs-on: ubuntu-latest
     permissions:
       contents: read
