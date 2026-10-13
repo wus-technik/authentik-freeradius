@@ -87,9 +87,18 @@ pw2="$(cat .state/pw2)"
 rejected password peapuser "$pw1" "the old WiFi password"
 peap peapuser "$pw2" || fail "the new WiFi password does not work"
 
+echo "== a stale tab cannot store a passphrase nobody has seen =="
+python3 -I drive.py staletab peapuser it-user-pw-0123456789 .state/pw3
+pw3="$(cat .state/pw3)"
+peap peapuser "$pw3" || fail "the passphrase saved and shown in the other tab does not work"
+
 echo "== the hash stays out of the event log, users cannot bind =="
-hash="$(python3 -I -c 'import sys; ns={}; exec(open("../../authentik/src/md4.py").read(), ns); print(ns["md4"](sys.argv[1].encode("utf-16-le")).hex().upper())' "$pw2")"
-python3 -I drive.py nohash "$hash" || fail "the NT hash appears in the event log"
+#  Every passphrase this run stored; drive.py also requires the flow's save
+#  events for peapuser in the log, or the absence would prove nothing.
+for pw in "$pw1" "$pw2" "$pw3"; do
+	hash="$(python3 -I -c 'import sys; ns={}; exec(open("../../authentik/src/md4.py").read(), ns); print(ns["md4"](sys.argv[1].encode("utf-16-le")).hex().upper())' "$pw")"
+	python3 -I drive.py nohash peapuser "$hash" || fail "an NT hash appears in the event log, or the check had nothing to look at"
+done
 ldap_search() {
 	"${COMPOSE[@]}" run --rm --quiet-pull --entrypoint ldapsearch client -x -H ldap://172.29.0.11:3389 \
 		-D "cn=$1,ou=users,dc=ldap,dc=goauthentik,dc=io" -w "$2" \

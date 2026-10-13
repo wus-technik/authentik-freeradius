@@ -4,3 +4,4 @@
 docker-compose.override.yml
 test/e2e/certs/
 test/authentik/.state/
+__pycache__/

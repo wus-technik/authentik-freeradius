@@ -8,9 +8,14 @@
                                  with the posted value, write the shown
                                  passphrase; fail unless the stored hash
                                  belongs to the shown passphrase
+    staletab <user> <pw> <out>   save from a second tab, then submit the first;
+                                 fail unless that submit is refused and the
+                                 saved passphrase stays; write it to <out>
     denied <user> <pw>           exit 0 if the flow refuses this user
     active <user> 0|1            deactivate / reactivate
-    nohash <hash>                exit 0 if no event contains this value
+    nohash <user> <hash>         exit 0 if no event contains this value;
+                                 fail unless the flow's save event for <user>
+                                 is in the log
 """
 import http.cookiejar
 import json
@@ -142,6 +147,10 @@ def field(challenge, key):
     return next((f.get("initial_value") for f in challenge.get("fields", []) if f["field_key"] == key), None)
 
 
+def nt_hash(passphrase):
+    return md4_ns["md4"](passphrase.encode("utf-16-le")).hex().upper()
+
+
 def stored_hash(user):
     return one(f"/core/users/?username={user}")["attributes"].get("wifi-password-nthash")
 
@@ -158,16 +167,42 @@ def flow(user, password, outfile):
         sys.exit(f"info field does not show SSID and certificate name: {info!r}")
     if field(b.executor("wlan-passwort"), "wifi_password") != shown:
         sys.exit("a re-render showed a different passphrase")
+    before = stored_hash(user)
     c = b.executor("wlan-passwort", {"component": "ak-stage-prompt", "wifi_ack": False})
-    if c["component"] != "ak-stage-prompt" or stored_hash(user) == md4_ns["md4"](shown.encode("utf-16-le")).hex().upper():
-        sys.exit("submitting without the checkbox saved the password")
+    if c["component"] != "ak-stage-prompt" or stored_hash(user) != before:
+        sys.exit("submitting without the checkbox changed the stored password")
     c = b.executor("wlan-passwort", {"component": "ak-stage-prompt", "wifi_password": "attacker-chosen", "wifi_ack": True})
     if c["component"] != "xak-flow-redirect":
         sys.exit(f"flow did not finish: {c}")
-    if stored_hash(user) != md4_ns["md4"](shown.encode("utf-16-le")).hex().upper():
+    if stored_hash(user) != nt_hash(shown):
         sys.exit("the stored hash does not belong to the shown passphrase")
     pathlib.Path(outfile).write_text(shown, encoding="utf-8")
     print(f"{user}: passphrase stored")
+
+
+def staletab(user, password, outfile):
+    """Two tabs of one session show the same passphrase; the second saves it.
+    The first tab's submit must then be refused instead of storing a fresh
+    passphrase nobody has seen."""
+    b = Browser()
+    b.login(user, password)
+    shown = field(b.start_wlan(), "wifi_password")
+    if not shown or field(b.executor("wlan-passwort"), "wifi_password") != shown:
+        sys.exit("the second tab did not show the first tab's passphrase")
+    ack = {"component": "ak-stage-prompt", "wifi_password": shown, "wifi_ack": True}
+    c = b.executor("wlan-passwort", ack)
+    if c["component"] != "xak-flow-redirect" or stored_hash(user) != nt_hash(shown):
+        sys.exit(f"the second tab did not save its passphrase: {c['component']}")
+    c = b.executor("wlan-passwort", ack)
+    if c["component"] == "xak-flow-redirect":
+        sys.exit("the stale tab's submit finished the flow")
+    if stored_hash(user) != nt_hash(shown):
+        sys.exit("the stale tab's submit replaced the shown passphrase with an unseen one")
+    errors = json.dumps(c.get("response_errors") or {}, ensure_ascii=False)
+    if "abgelaufen" not in errors:
+        sys.exit(f"the stale tab's submit was refused, but not as expired: {c['component']} {errors[:300]}")
+    pathlib.Path(outfile).write_text(shown, encoding="utf-8")
+    print(f"{user}: stale tab refused as expired")
 
 
 def denied(user, password):
@@ -182,12 +217,41 @@ def active(user, flag):
     api("PATCH", f"/core/users/{pk}/", {"is_active": flag == "1"})
 
 
-def nohash(value):
-    events = json.dumps(api("GET", "/events/events/?page_size=1000&ordering=-created")["results"])
-    sys.exit(0 if value not in events else "the hash appears in the event log")
+def all_events():
+    events, page = [], 1
+    while page:
+        result = api("GET", f"/events/events/?page_size=500&ordering=-created&page={page}")
+        events += result["results"]
+        page = result["pagination"]["next"]
+    return events
+
+
+def is_flow_save(event, user):
+    """The model_updated event the WiFi password flow writes when it saves."""
+    context = event.get("context") or {}
+    model = context.get("model") or {}
+    return (event.get("action") == "model_updated" and model.get("model_name") == "user"
+            and model.get("name") == user
+            and (context.get("http_request") or {}).get("path", "").endswith("/flows/executor/wlan-passwort/"))
+
+
+def nohash(user, value):
+    #  Absence only means something if the events that could carry the hash
+    #  are there: the user update the flow's save wrote.
+    deadline = time.monotonic() + 30
+    while True:
+        events = all_events()
+        if any(is_flow_save(e, user) for e in events):
+            break
+        if time.monotonic() > deadline:
+            sys.exit(f"no model_updated event of the WiFi password flow for {user}; "
+                     f"the absence of the hash would prove nothing ({len(events)} events)")
+        time.sleep(3)
+    sys.exit(0 if value not in json.dumps(events) else "the hash appears in the event log")
 
 
 if __name__ == "__main__":
     STATE.mkdir(exist_ok=True)
     cmd, args = sys.argv[1], sys.argv[2:]
-    {"setup": setup, "flow": flow, "denied": denied, "active": active, "nohash": nohash}[cmd](*args)
+    {"setup": setup, "flow": flow, "staletab": staletab, "denied": denied, "active": active,
+     "nohash": nohash}[cmd](*args)

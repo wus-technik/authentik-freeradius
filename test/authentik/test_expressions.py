@@ -106,7 +106,10 @@ class WordlistTest(unittest.TestCase):
 class GenerateTest(unittest.TestCase):
     def setUp(self):
         self.user = FakeUser()
-        self.http = types.SimpleNamespace(session={})
+        self.http = types.SimpleNamespace(session={}, method="GET")
+
+    def submit(self):
+        return types.SimpleNamespace(session=self.http.session, method="POST")
 
     def test_six_words_from_the_list(self):
         words = set(build_blueprint.words())
@@ -122,6 +125,21 @@ class GenerateTest(unittest.TestCase):
         first = generate(self.user, self.http)
         self.user.attributes["wifi-password-set-at"] = "2026-10-13T00:00:00+00:00"
         self.assertNotEqual(generate(self.user, self.http), first)
+
+    def test_submit_without_pending_value_makes_none(self):
+        self.assertEqual(generate(self.user, self.submit()), "")
+        self.assertEqual(self.http.session, {})
+
+    def test_submit_after_save_makes_none(self):
+        generate(self.user, self.http)
+        before = dict(self.http.session)
+        self.user.attributes["wifi-password-set-at"] = "2026-10-13T00:00:00+00:00"
+        self.assertEqual(generate(self.user, self.submit()), "")
+        self.assertEqual(self.http.session, before)
+
+    def test_submit_returns_the_pending_value(self):
+        shown = generate(self.user, self.http)
+        self.assertEqual(generate(self.user, self.submit()), shown)
 
     def test_preview_without_request(self):
         self.assertEqual(generate(self.user, None), "")
