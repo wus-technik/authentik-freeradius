@@ -74,7 +74,9 @@ write_vlan_map() {
 		case "$vlan" in
 			''|*[!0-9]*) die "VLAN_MAP: '$pair' - expected name=vlan-id" ;;
 		esac
-		[ "$vlan" -ge 1 ] && [ "$vlan" -le 4094 ] || die "VLAN_MAP: '$pair' - the VLAN id must be 1-4094"
+		if [ "$vlan" -lt 1 ] || [ "$vlan" -gt 4094 ]; then
+			die "VLAN_MAP: '$pair' - the VLAN id must be 1-4094"
+		fi
 		body="$body$(printf '	case "%s" {
 		update reply {
 			&Tunnel-Type := VLAN

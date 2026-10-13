@@ -107,7 +107,9 @@ old_ip="$(outpost_ip)"
 "${COMPOSE[@]}" run -d --rm --name akfr-e2e-squatter --entrypoint sleep client 600 >/dev/null 2>&1
 "${COMPOSE[@]}" up -d --no-deps authentik_radius >/dev/null 2>&1
 new_ip="$(outpost_ip)"
-[ -n "$new_ip" ] && [ "$new_ip" != "$old_ip" ] || fail "the outpost kept its address ($old_ip); the recreate test cannot prove anything"
+if [ -z "$new_ip" ] || [ "$new_ip" = "$old_ip" ]; then
+	fail "the outpost kept its address ($old_ip); the recreate test cannot prove anything"
+fi
 echo "   outpost moved from $old_ip to $new_ip"
 
 deadline=$(( $(date +%s) + 90 ))
