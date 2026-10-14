@@ -13,6 +13,16 @@ peap() {
 	"${COMPOSE[@]}" run --rm --quiet-pull -e AUTH_METHOD=peap -e AUTH_USER="$1" \
 		-e AUTH_PASSWORD="$2" client >/dev/null 2>&1
 }
+# accepted <user> <password> <what>: PEAP must succeed within 60s. A one-off
+# failure -- the outpost reconnecting, a slow client container -- must not fail
+# the run; a lasting one still does.
+accepted() {
+	local deadline=$(( $(date +%s) + 60 ))
+	until peap "$1" "$2"; do
+		[ "$(date +%s)" -lt "$deadline" ] || fail "$3"
+		sleep 3
+	done
+}
 notfound() {
 	"${COMPOSE[@]}" logs freeradius 2>&1 | grep -c "peap: no active WLAN user with a WiFi password: $1\$" || true
 }
@@ -26,8 +36,8 @@ rejected() {
 	out="$("${COMPOSE[@]}" run --rm --quiet-pull -e AUTH_METHOD=peap -e AUTH_USER="$2" \
 		-e AUTH_PASSWORD="$3" -e AUTH_DUMP=1 client 2>&1)" || rc=$?
 	[ "$rc" -ne 0 ] || fail "PEAP accepted $4"
-	printf '%s\n' "$out" | grep -q 'code=3 (Access-Reject)' \
-		|| fail "PEAP with $4 failed without an Access-Reject: $(printf '%s\n' "$out" | tail -3)"
+	grep -q 'code=3 (Access-Reject)' <<<"$out" \
+		|| fail "PEAP with $4 failed without an Access-Reject: $(tail -3 <<<"$out")"
 	after="$(notfound "$2")"
 	case "$1" in
 		directory) [ "$after" -gt "$before" ] || fail "PEAP refused $4, but not in the directory lookup" ;;
@@ -66,11 +76,7 @@ python3 -I drive.py denied outsider it-user-pw-0123456789 || fail "a user outsid
 
 echo "== PEAP with the generated password =="
 pw1="$(cat .state/pw1)"
-deadline=$(( $(date +%s) + 60 ))
-until peap peapuser "$pw1"; do
-	[ "$(date +%s)" -lt "$deadline" ] || fail "PEAP with the generated password was rejected"
-	sleep 3
-done
+accepted peapuser "$pw1" "PEAP with the generated password was rejected"
 rejected password peapuser wrong-password "a wrong password"
 rejected password peapuser it-user-pw-0123456789 "the SSO password"
 
@@ -78,19 +84,19 @@ echo "== deactivation applies at once =="
 python3 -I drive.py active peapuser 0
 rejected directory peapuser "$pw1" "a deactivated user"
 python3 -I drive.py active peapuser 1
-peap peapuser "$pw1" || fail "PEAP refused the reactivated user"
+accepted peapuser "$pw1" "PEAP refused the reactivated user"
 
 echo "== a new password replaces the old one =="
 python3 -I drive.py flow peapuser it-user-pw-0123456789 .state/pw2
 pw2="$(cat .state/pw2)"
 [ "$pw1" != "$pw2" ] || fail "the flow showed the same passphrase again after saving"
 rejected password peapuser "$pw1" "the old WiFi password"
-peap peapuser "$pw2" || fail "the new WiFi password does not work"
+accepted peapuser "$pw2" "the new WiFi password does not work"
 
 echo "== a stale tab cannot store a passphrase nobody has seen =="
 python3 -I drive.py staletab peapuser it-user-pw-0123456789 .state/pw3
 pw3="$(cat .state/pw3)"
-peap peapuser "$pw3" || fail "the passphrase saved and shown in the other tab does not work"
+accepted peapuser "$pw3" "the passphrase saved and shown in the other tab does not work"
 
 echo "== the hash stays out of the event log, users cannot bind =="
 #  Every passphrase this run stored; drive.py also requires the flow's save
@@ -111,7 +117,7 @@ ldap_search svc-wlan-ldap "$IT_LDAP_BIND_PASSWORD" >/dev/null \
 rc=0
 out="$(ldap_search peapuser it-user-pw-0123456789)" || rc=$?
 [ "$rc" -ne 0 ] || fail "an ordinary user could bind to the wlan-ldap provider"
-printf '%s\n' "$out" | grep -q 'Insufficient access (50)' \
+grep -q 'Insufficient access (50)' <<<"$out" \
 	|| fail "the bind of an ordinary user failed, but not with Insufficient access: $out"
 
 echo

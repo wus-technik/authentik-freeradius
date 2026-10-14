@@ -31,6 +31,10 @@ ROOT = HERE.parents[1]
 STATE = HERE / ".state"
 BASE = "http://127.0.0.1:19000"
 TOKEN = "it-bootstrap-token-not-a-real-one"
+#  Every request gets a timeout: a server that accepts the connection and never
+#  answers must fail the run, not hang it.
+TIMEOUT = 30
+EXPIRED = "Das WLAN-Passwort ist abgelaufen. Bitte lade die Seite neu."
 sys.path.insert(0, str(ROOT / "authentik"))
 md4_ns = {}
 exec((ROOT / "authentik" / "src" / "md4.py").read_text(encoding="utf-8"), md4_ns)
@@ -41,7 +45,7 @@ def api(method, path, data=None, raw=None, ctype="application/json"):
     req = urllib.request.Request(f"{BASE}/api/v3{path}", method=method, data=body,
                                  headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": ctype})
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             text = resp.read()
             return json.loads(text) if text else {}
     except urllib.error.HTTPError as exc:
@@ -80,10 +84,13 @@ def wait_for_defaults(timeout=300):
         req = urllib.request.Request(f"{BASE}/api/v3/managed/blueprints/?page_size=500",
                                      headers={"Authorization": f"Bearer {TOKEN}"})
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
                 pending = [b["path"] for b in json.loads(resp.read())["results"] if b["status"] == "unknown"]
         except urllib.error.HTTPError as exc:
             pending = [f"HTTP {exc.code}"]
+        except OSError as exc:
+            #  URLError, a reset or a timeout while the server restarts.
+            pending = [repr(exc)]
         if not pending:
             return
         if time.monotonic() > deadline:
@@ -93,6 +100,7 @@ def wait_for_defaults(timeout=300):
 
 def setup():
     wait_for_defaults()
+    print(f"authentik {api('GET', '/admin/version/')['version_current']}")
     import_blueprint()
     wlan = one("/core/groups/?name=wlan")["pk"]
     search = one("/core/groups/?name=wlan-ldap-search")["pk"]
@@ -127,11 +135,11 @@ class Browser:
                                      data=json.dumps(body).encode() if body else None,
                                      headers={"Content-Type": "application/json", "X-authentik-CSRF": csrf,
                                               "Referer": BASE})
-        with self.opener.open(req) as resp:
+        with self.opener.open(req, timeout=TIMEOUT) as resp:
             return json.loads(resp.read())
 
     def login(self, user, password):
-        self.opener.open(f"{BASE}/if/flow/default-authentication-flow/").read()
+        self.opener.open(f"{BASE}/if/flow/default-authentication-flow/", timeout=TIMEOUT).read()
         self.executor("default-authentication-flow")
         self.executor("default-authentication-flow", {"component": "ak-stage-identification", "uid_field": user})
         c = self.executor("default-authentication-flow", {"component": "ak-stage-password", "password": password})
@@ -139,7 +147,7 @@ class Browser:
             sys.exit(f"login of {user} failed: {c}")
 
     def start_wlan(self):
-        self.opener.open(f"{BASE}/if/flow/wlan-passwort/").read()
+        self.opener.open(f"{BASE}/if/flow/wlan-passwort/", timeout=TIMEOUT).read()
         return self.executor("wlan-passwort")
 
 
@@ -198,8 +206,9 @@ def staletab(user, password, outfile):
         sys.exit("the stale tab's submit finished the flow")
     if stored_hash(user) != nt_hash(shown):
         sys.exit("the stale tab's submit replaced the shown passphrase with an unseen one")
-    errors = json.dumps(c.get("response_errors") or {}, ensure_ascii=False)
-    if "abgelaufen" not in errors:
+    messages = [e.get("string") for errs in (c.get("response_errors") or {}).values() for e in errs]
+    if EXPIRED not in messages:
+        errors = json.dumps(c.get("response_errors") or {}, ensure_ascii=False)
         sys.exit(f"the stale tab's submit was refused, but not as expired: {c['component']} {errors[:300]}")
     pathlib.Path(outfile).write_text(shown, encoding="utf-8")
     print(f"{user}: stale tab refused as expired")
