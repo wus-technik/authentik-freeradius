@@ -24,12 +24,13 @@ case "${AUTH_METHOD:-ttls}" in
 		;;
 esac
 
-# Test identities and passwords contain no sed metacharacters except the ones
-# the injection test sends on purpose, so escape & / and \ for the replacement.
-esc() { printf '%s' "$1" | sed 's/[&/\]/\\&/g'; }
-sed -e "s/^\([[:space:]]*\)identity=\".*\"/\1identity=\"$(esc "$user")\"/" "$profile" >/tmp/profile.conf
+# wpa_supplicant takes an unquoted string value as hex, so any character --
+# including the quotes and LDAP metacharacters the tests send on purpose --
+# arrives verbatim, and the hex digits need no escaping in sed.
+hex() { printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
+sed -e "s/^\([[:space:]]*\)identity=\".*\"/\1identity=$(hex "$user")/" "$profile" >/tmp/profile.conf
 if [ -n "${AUTH_PASSWORD:-}" ]; then
-	sed -i "s/^\([[:space:]]*\)password=\".*\"/\1password=\"$(esc "$AUTH_PASSWORD")\"/" /tmp/profile.conf
+	sed -i "s/^\([[:space:]]*\)password=\".*\"/\1password=$(hex "$AUTH_PASSWORD")/" /tmp/profile.conf
 fi
 
 # eapol_test -a requires an IP address, not a hostname.

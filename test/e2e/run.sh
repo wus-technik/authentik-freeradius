@@ -48,7 +48,7 @@ rejects() {
 	[ "$rc" -ne 0 ] || fail "freeradius started with $*; expected it to refuse: $expect"
 	[ "$rc" -ne 124 ] || fail "freeradius kept running for 60s with $*; it must refuse promptly: $expect"
 	[ "$rc" -le 128 ] || fail "freeradius was killed (exit $rc) with $*; it must refuse by itself: $expect"
-	printf '%s\n' "$out" | grep -qF "$expect" \
+	grep -qF "$expect" <<<"$out" \
 		|| fail "freeradius refused $* without saying '$expect'. Output: $out"
 }
 
@@ -68,25 +68,23 @@ echo "== dynamic VLAN from Filter-Id =="
 # The stand-in returns Filter-Id the way an authentik property mapping does;
 # VLAN_MAP in docker-compose.test.yml maps vlan-staff to 20 (issue #10).
 reply() {
-	"${COMPOSE[@]}" run --rm --quiet-pull -e AUTH_USER="$1" -e AUTH_DUMP=1 client 2>/dev/null 		| sed -n '/code=2 (Access-Accept)/,/^[^ ]/p'
+	"${COMPOSE[@]}" run --rm --quiet-pull -e AUTH_USER="$1" -e AUTH_DUMP=1 client 2>/dev/null \
+		| sed -n '/code=2 (Access-Accept)/,/^[^ ]/p'
 }
 mapped="$(reply testuser)"
 [ -n "$mapped" ] || fail "no Access-Accept for testuser"
-printf '%s
-' "$mapped" | grep -A1 'Attribute 64 (Tunnel-Type)' | grep -q 'Value: 0000000d' 	|| fail "Tunnel-Type = VLAN missing from the outer Access-Accept"
-printf '%s
-' "$mapped" | grep -A1 'Attribute 65 (Tunnel-Medium-Type)' | grep -q 'Value: 00000006' 	|| fail "Tunnel-Medium-Type = IEEE-802 missing from the outer Access-Accept"
-printf '%s
-' "$mapped" | grep -A1 'Attribute 81 (Tunnel-Private-Group-Id)' | grep -q 'Value: 3230$' 	|| fail "Tunnel-Private-Group-Id = 20 missing from the outer Access-Accept"
+grep -A1 'Attribute 64 (Tunnel-Type)' <<<"$mapped" | grep -q 'Value: 0000000d' \
+	|| fail "Tunnel-Type = VLAN missing from the outer Access-Accept"
+grep -A1 'Attribute 65 (Tunnel-Medium-Type)' <<<"$mapped" | grep -q 'Value: 00000006' \
+	|| fail "Tunnel-Medium-Type = IEEE-802 missing from the outer Access-Accept"
+grep -A1 'Attribute 81 (Tunnel-Private-Group-Id)' <<<"$mapped" | grep -q 'Value: 3230$' \
+	|| fail "Tunnel-Private-Group-Id = 20 missing from the outer Access-Accept"
 unmapped="$(reply otheruser)"
 [ -n "$unmapped" ] || fail "no Access-Accept for otheruser"
-if printf '%s
-' "$unmapped" | grep -q 'Attribute 81 '; then
+if grep -q 'Attribute 81 ' <<<"$unmapped"; then
 	fail "an unmapped Filter-Id name produced a VLAN; it must fall back to the SSID's VLAN"
 fi
-if printf '%s
-%s
-' "$mapped" "$unmapped" | grep -q 'Attribute 11 (Filter-Id)'; then
+if grep -q 'Attribute 11 (Filter-Id)' <<<"$mapped"$'\n'"$unmapped"; then
 	fail "Filter-Id leaked to the access point"
 fi
 echo "   ok"
@@ -148,64 +146,82 @@ rejects "AUTHENTIK_RADIUS_HOST must be a literal IPv4 address" AUTHENTIK_RADIUS_
 peap_on=(PEAP_ENABLE=true LDAP_HOST=172.28.0.11
 	"LDAP_BASE_DN=dc=ldap,dc=goauthentik,dc=io"
 	"LDAP_BIND_DN=cn=svc-wlan-ldap,ou=users,dc=ldap,dc=goauthentik,dc=io"
-	LDAP_BIND_PASSWORD=e2e-ldap-bind-not-a-real-one
+	'LDAP_BIND_PASSWORD=e2e-ldap-"bind\n%{User-Name} not-a-real-one'
 	"LDAP_WLAN_GROUP_DN=cn=wlan,ou=groups,dc=ldap,dc=goauthentik,dc=io")
 rejects "PEAP_ENABLE must be true or false" PEAP_ENABLE=yes
 rejects "PEAP_ENABLE=true requires LDAP_BIND_PASSWORD" "${peap_on[@]}" LDAP_BIND_PASSWORD=
 rejects "LDAP_HOST must be a literal IPv4 address" "${peap_on[@]}" LDAP_HOST=authentik_ldap
 rejects "LDAP_WLAN_GROUP_DN may only contain" "${peap_on[@]}" "LDAP_WLAN_GROUP_DN=cn=wlan(x),ou=groups,dc=ldap,dc=goauthentik,dc=io"
 rejects "LDAP_BASE_DN may only contain" "${peap_on[@]}" "LDAP_BASE_DN=dc=%{User-Name},dc=io"
+rejects "LDAP_BIND_DN may only contain" "${peap_on[@]}" 'LDAP_BIND_DN=cn=svc"wlan,ou=users,dc=ldap,dc=goauthentik,dc=io'
 rejects "LDAP_PORT must be a port number" "${peap_on[@]}" LDAP_PORT=3389x
+for port in 0 03389 65536 99999999999999999999; do
+	rejects "LDAP_PORT must be 1-65535" "${peap_on[@]}" LDAP_PORT="$port"
+done
 echo "   ok"
 
 peap() { auth -e AUTH_METHOD=peap -e AUTH_USER="$1" -e AUTH_PASSWORD="$2"; }
 
+# peap_refused <user> <password> [docker compose run args]: the attempt must end
+# in an Access-Reject. A client that cannot start or a server that never answers
+# also "does not succeed", and would pass a plain negative check.
+peap_refused() {
+	local user="$1" password="$2" out rc=0
+	shift 2
+	out="$("${COMPOSE[@]}" run --rm --quiet-pull "$@" -e AUTH_METHOD=peap -e AUTH_USER="$user" \
+		-e AUTH_PASSWORD="$password" -e AUTH_DUMP=1 client 2>&1)" || rc=$?
+	[ "$rc" -ne 0 ] || fail "PEAP accepted '$user' with password '$password'"
+	grep -q 'code=3 (Access-Reject)' <<<"$out" \
+		|| fail "PEAP for '$user' failed without an Access-Reject: $(tail -3 <<<"$out")"
+}
+
 echo "== PEAP-MSCHAPv2 against the LDAP outpost =="
 peap peapuser e2e-peap-pw || fail "PEAP with the right WiFi password was rejected"
-if peap peapuser wrong-password; then fail "PEAP accepted a wrong password"; fi
+peap_refused peapuser wrong-password
 for u in peapinactive peapnogroup peapnohash; do
-	if peap "$u" e2e-peap-pw; then fail "PEAP accepted $u, who must be refused"; fi
+	peap_refused "$u" e2e-peap-pw
 done
 # Each refusal must come from the directory filter, not from a later failure.
-# The line ends with the user name, so anchor on it: no user matches another's line.
+# The line ends with the user name, so anchor on it: no user matches another's
+# line. [[:space:]]* allows for a trailing carriage return in the log output.
 peap_log="$("${COMPOSE[@]}" logs freeradius 2>&1)"
 for u in peapinactive peapnogroup peapnohash; do
-	printf '%s\n' "$peap_log" | grep -q "peap: no active WLAN user with a WiFi password: $u\$" \
+	grep -qE "peap: no active WLAN user with a WiFi password: ${u}[[:space:]]*\$" <<<"$peap_log" \
 		|| fail "no log line for the refused PEAP login of $u"
 done
 # User-Name goes into an LDAP filter; metacharacters must not widen it.
 for u in '*' 'peapuser)(cn=*' 'peap*'; do
-	if peap "$u" e2e-peap-pw; then fail "PEAP accepted the user name '$u'"; fi
+	peap_refused "$u" e2e-peap-pw
 done
 echo "   ok"
 
 echo "== nothing from inside the PEAP tunnel reaches the access point =="
-accept="$("${COMPOSE[@]}" run --rm --quiet-pull -e AUTH_METHOD=peap -e AUTH_DUMP=1 client 2>/dev/null 	| sed -n '/code=2 (Access-Accept)/,/^[^ ]/p')"
+accept="$("${COMPOSE[@]}" run --rm --quiet-pull -e AUTH_METHOD=peap -e AUTH_DUMP=1 client 2>/dev/null \
+	| sed -n '/code=2 (Access-Accept)/,/^[^ ]/p')"
 [ -n "$accept" ] || fail "no Access-Accept for peapuser"
 # Positive control: the MPPE keys (Microsoft vendor 311 = 0x137, type 16/17)
 # must be there, or the pattern below proves nothing.
-printf '%s
-' "$accept" | grep -qi 'Value: 0000013710' 	|| fail "MS-MPPE-Send-Key missing from the outer Access-Accept"
+grep -qi 'Value: 0000013710' <<<"$accept" \
+	|| fail "MS-MPPE-Send-Key missing from the outer Access-Accept"
 # MS-CHAP2-Success is vendor 311 type 26 (0x1a). It belongs inside the tunnel.
-if printf '%s
-' "$accept" | grep -qi 'Value: 000001371a'; then
+if grep -qi 'Value: 000001371a' <<<"$accept"; then
 	fail "MS-CHAP2-Success from inside the tunnel leaked into the outer Access-Accept"
 fi
 # eap_mschapv2 strips MS-CHAP2-Success itself, so the check above holds even
 # with use_tunneled_reply = yes. What that setting does let through is the
 # inner User-Name: the outer reply then names the inner identity instead of the
 # anonymous outer one. That is the pattern that fails on a regression.
-if printf '%s\n' "$accept" | grep -q "Value: 'peapuser'"; then
+if grep -q "Value: 'peapuser'" <<<"$accept"; then
 	fail "the inner identity from inside the tunnel leaked into the outer Access-Accept"
 fi
-printf '%s\n' "$accept" | grep -q "Value: 'anonymous'" \
+grep -q "Value: 'anonymous'" <<<"$accept" \
 	|| fail "the outer User-Name (anonymous) is missing from the Access-Accept"
 echo "   ok"
 
 echo "== PEAP while the LDAP outpost is down =="
 "${COMPOSE[@]}" stop authentik_ldap >/dev/null
 start=$(date +%s)
-if peap peapuser e2e-peap-pw; then fail "PEAP succeeded with the LDAP outpost stopped"; fi
+peap_refused peapuser e2e-peap-pw
 took=$(( $(date +%s) - start ))
 [ "$took" -le 15 ] || fail "PEAP took ${took}s to fail with the LDAP outpost down; it must fail fast"
 auth || fail "EAP-TTLS failed while only the LDAP outpost was down"
@@ -218,7 +234,7 @@ until auth; do
 	[ "$(date +%s)" -lt "$deadline" ] || fail "radiusd did not come back without the LDAP outpost"
 	sleep 3
 done
-if peap peapuser e2e-peap-pw; then fail "PEAP succeeded with the LDAP outpost stopped"; fi
+peap_refused peapuser e2e-peap-pw
 echo "   ok"
 
 echo "== LDAP outpost back, no radiusd restart =="
@@ -256,9 +272,7 @@ until auth -e AUTH_TARGET=akfr-e2e-nopeap; do
 	[ "$(date +%s)" -lt "$deadline" ] || fail "EAP-TTLS failed against the container with PEAP switched off"
 	sleep 3
 done
-if auth -e AUTH_TARGET=akfr-e2e-nopeap -e AUTH_METHOD=peap; then
-	fail "PEAP succeeded with PEAP_ENABLE=false"
-fi
+peap_refused peapuser e2e-peap-pw -e AUTH_TARGET=akfr-e2e-nopeap
 docker rm -f akfr-e2e-nopeap >/dev/null
 echo "   ok"
 

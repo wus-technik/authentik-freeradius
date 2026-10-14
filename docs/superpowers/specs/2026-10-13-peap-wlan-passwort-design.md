@@ -281,7 +281,7 @@ Entschieden in § 11a. Dieser Teil gilt auch ohne PEAP. Er schließt #15 und kom
 |---|---|---|
 | `PEAP_ENABLE` | – | `true` schaltet PEAP ein. Standard `false`. |
 | `LDAP_HOST` | – | Literale IPv4-Adresse des LDAP-Outposts; die Zusatzdatei setzt sie aus `AUTHENTIK_LDAP_IP`. Ein Name führt zum Abbruch (§ 6.0). |
-| `LDAP_PORT` | – | Standard `3389` (Klartext-Port des Outposts) |
+| `LDAP_PORT` | – | Standard `3389` (Klartext-Port des Outposts); 1–65535 ohne führende Null, sonst verweigert der Entrypoint den Start |
 | `LDAP_BASE_DN` | ja | Base-DN des Providers, z. B. `dc=ldap,dc=goauthentik,dc=io` |
 | `LDAP_BIND_DN` | ja | DN des Servicekontos |
 | `LDAP_BIND_PASSWORD` | ja | App-Passwort-Token des Servicekontos |

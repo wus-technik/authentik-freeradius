@@ -59,8 +59,7 @@ export RADIUS_HEALTHCHECK_SECRET
 write_vlan_map() {
 	out=/run/radiusd/vlan-map.conf
 	map="$(printf '%s' "${VLAN_MAP:-}" | tr ',' ' ')"
-	if [ -z "$(printf '%s' "$map" | tr -d ' 	
-')" ]; then
+	if [ -z "$(printf '%s' "$map" | tr -d ' \t\n')" ]; then
 		: > "$out"
 		return 0
 	fi
@@ -68,8 +67,8 @@ write_vlan_map() {
 	for pair in $map; do
 		name="${pair%%=*}"
 		vlan="${pair#*=}"
-		printf '%s
-' "$name" | grep -qxE '[A-Za-z0-9._-]{1,64}' 			|| die "VLAN_MAP: '$pair' - the name must be 1-64 of A-Z a-z 0-9 . _ -"
+		printf '%s\n' "$name" | grep -qxE '[A-Za-z0-9._-]{1,64}' \
+			|| die "VLAN_MAP: '$pair' - the name must be 1-64 of A-Z a-z 0-9 . _ -"
 		case "$vlan" in
 			''|*[!0-9]*) die "VLAN_MAP: '$pair' - expected name=vlan-id" ;;
 		esac
@@ -174,6 +173,13 @@ write_peap_includes() {
 	case "$LDAP_PORT" in
 		''|*[!0-9]*) die "LDAP_PORT must be a port number (got '$LDAP_PORT')" ;;
 	esac
+	# No leading zero (that also rules out 0); the length check keeps test(1)
+	# away from numbers too large for it.
+	case "$LDAP_PORT" in
+		0*) die "LDAP_PORT must be 1-65535 (got '$LDAP_PORT')" ;;
+	esac
+	{ [ "${#LDAP_PORT}" -le 5 ] && [ "$LDAP_PORT" -le 65535 ]; } \
+		|| die "LDAP_PORT must be 1-65535 (got '$LDAP_PORT')"
 	export LDAP_PORT
 
 	# shellcheck disable=SC2016 # literal FreeRADIUS directive

@@ -11,3 +11,4 @@ Dockerfile      text eol=lf
 freeradius/**   text eol=lf
 authentik/**    text eol=lf
 test/authentik/** text eol=lf
+test/e2e/** text eol=lf

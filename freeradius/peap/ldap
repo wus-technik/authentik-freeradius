@@ -4,7 +4,9 @@ ldap {
 	server = "$ENV{LDAP_HOST}"
 	port = "$ENV{LDAP_PORT}"
 	identity = "$ENV{LDAP_BIND_DN}"
-	password = "$ENV{LDAP_BIND_PASSWORD}"
+	#  A bare word on purpose: a double-quoted value is run through xlat when
+	#  the module is parsed, which eats backslashes and expands %{...}.
+	password = $ENV{LDAP_BIND_PASSWORD}
 	base_dn = "$ENV{LDAP_BASE_DN}"
 
 	#  32 hex characters. The pap call in peap-inner-tunnel turns them into

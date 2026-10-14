@@ -47,7 +47,9 @@ services:
       LDAP_HOST: 172.28.0.11
       LDAP_BASE_DN: dc=ldap,dc=goauthentik,dc=io
       LDAP_BIND_DN: cn=svc-wlan-ldap,ou=users,dc=ldap,dc=goauthentik,dc=io
-      LDAP_BIND_PASSWORD: e2e-ldap-bind-not-a-real-one
+      # A quote, a backslash, an xlat expression and a space: the password must
+      # reach the LDAP bind verbatim (see the comment in freeradius/peap/ldap).
+      LDAP_BIND_PASSWORD: 'e2e-ldap-"bind\n%{User-Name} not-a-real-one'
       LDAP_WLAN_GROUP_DN: cn=wlan,ou=groups,dc=ldap,dc=goauthentik,dc=io
     volumes:
       - ./certs:/certs:ro
