@@ -35,35 +35,52 @@ def nt_hash(password):
 
 
 class FakeUser:
-    def __init__(self, pk=1, attributes=None):
+    def __init__(self, pk=1, attributes=None, journal=None):
         self.pk = pk
         self.username = f"user{pk}"
         self.attributes = dict(attributes or {})
         self.saves = []
+        self.journal = journal if journal is not None else []
 
     def save(self, update_fields=None):
         self.saves.append(update_fields)
+        self.journal.append("save")
 
 
 class FakeManager:
-    def __init__(self, users, broken=False):
+    """Records the query: get() only after select_for_update(), inside atomic()."""
+
+    def __init__(self, users, journal, broken=False):
         self.users = users
+        self.journal = journal
         self.broken = broken
 
     def select_for_update(self):
+        self.journal.append("select_for_update")
         return self
 
     def get(self, pk):
+        self.journal.append("get")
         if self.broken:
             raise RuntimeError("database is gone")
         return self.users[pk]
 
 
 def install_fakes(users, broken=False):
+    journal = []
+
+    @contextlib.contextmanager
+    def atomic():
+        journal.append("begin")
+        yield
+        journal.append("commit")
+
+    for user in users.values():
+        user.journal = journal
     db = types.ModuleType("django.db")
-    db.transaction = types.SimpleNamespace(atomic=contextlib.nullcontext)
+    db.transaction = types.SimpleNamespace(atomic=atomic)
     models = types.ModuleType("authentik.core.models")
-    models.User = types.SimpleNamespace(objects=FakeManager(users, broken))
+    models.User = types.SimpleNamespace(objects=FakeManager(users, journal, broken))
     sys.modules.update({
         "django": types.ModuleType("django"),
         "django.db": db,
@@ -71,6 +88,7 @@ def install_fakes(users, broken=False):
         "authentik.core": types.ModuleType("authentik.core"),
         "authentik.core.models": models,
     })
+    return journal
 
 
 class Logger:
@@ -148,15 +166,15 @@ class GenerateTest(unittest.TestCase):
 class SaveTest(unittest.TestCase):
     def setUp(self):
         self.user = FakeUser()
-        install_fakes({1: self.user})
+        self.journal = install_fakes({1: self.user})
         self.session = {"wifi_password_pending": {"pw": "acid-acorn-acre-acts-afar-affix", "base": ""}}
         self.messages = []
 
-    def run_save(self, prompt_data):
+    def run_save(self, prompt_data, request_user=None):
         request = types.SimpleNamespace(
             context={"prompt_data": prompt_data},
             http_request=types.SimpleNamespace(session=self.session),
-            user=self.user,
+            user=request_user or self.user,
         )
         return save(request, self.messages.append, Logger())
 
@@ -172,6 +190,20 @@ class SaveTest(unittest.TestCase):
         self.user.attributes["settings"] = {"locale": "de"}
         self.run_save({"wifi_password": "acid-acorn-acre-acts-afar-affix", "wifi_ack": True})
         self.assertEqual(self.user.attributes["settings"], {"locale": "de"})
+
+    def test_locks_and_saves_the_row_inside_one_transaction(self):
+        self.run_save({"wifi_password": "acid-acorn-acre-acts-afar-affix", "wifi_ack": True})
+        self.assertEqual(self.journal, ["begin", "select_for_update", "get", "save", "commit"])
+
+    def test_writes_onto_a_fresh_read_not_the_request_user(self):
+        # The flow's copy of the user is stale: another change landed meanwhile.
+        stale = FakeUser(attributes={"settings": {"locale": "en"}})
+        self.user.attributes["settings"] = {"locale": "de"}
+        self.assertTrue(self.run_save({"wifi_password": "acid-acorn-acre-acts-afar-affix", "wifi_ack": True},
+                                      request_user=stale))
+        self.assertEqual(self.user.attributes["settings"], {"locale": "de"})
+        self.assertIn("wifi-password-nthash", self.user.attributes)
+        self.assertEqual(stale.saves, [])
 
     def test_refuses_a_value_that_is_not_the_pending_one(self):
         ok = self.run_save({"wifi_password": "attacker-chosen", "wifi_ack": True})
@@ -193,7 +225,7 @@ class SaveTest(unittest.TestCase):
         self.assertFalse(self.run_save({"wifi_password": "", "wifi_ack": True}))
 
     def test_database_error_writes_nothing(self):
-        install_fakes({1: self.user}, broken=True)
+        self.journal = install_fakes({1: self.user}, broken=True)
         self.assertFalse(self.run_save({"wifi_password": "acid-acorn-acre-acts-afar-affix", "wifi_ack": True}))
         self.assertNotIn("wifi-password-nthash", self.user.attributes)
         self.assertIn("wifi_password_pending", self.session)

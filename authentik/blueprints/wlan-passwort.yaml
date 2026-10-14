@@ -104,8 +104,14 @@ entries:
             ak_logger.warning("wifi password not saved", exc=repr(exc))
             ak_message("Das WLAN-Passwort konnte nicht gespeichert werden. Bitte versuche es erneut.")
             return False
-        request.http_request.session.pop("wifi_password_pending", None)
-        ak_logger.info("wifi password set", user=fresh.username)
+        # The password is stored from here on; nothing below may turn that into a
+        # refusal. A pending value left behind is harmless: the generate expression
+        # drops it once wifi-password-set-at has moved on.
+        try:
+            request.http_request.session.pop("wifi_password_pending", None)
+            ak_logger.info("wifi password set", user=fresh.username)
+        except Exception as exc:
+            ak_logger.warning("wifi password set, session not cleared", exc=repr(exc))
         return True
   - model: authentik_stages_prompt.prompt
     id: prompt-password
