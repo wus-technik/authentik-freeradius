@@ -184,7 +184,7 @@ must not be reused:
 ```
 client monitoring {
 	ipaddr = $ENV{RADIUS_MONITOR_NET}
-	secret = "$ENV{RADIUS_MONITOR_SECRET}"
+	secret = $ENV{RADIUS_MONITOR_SECRET}
 	require_message_authenticator = yes
 }
 ```

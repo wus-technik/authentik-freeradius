@@ -10,7 +10,7 @@
 # of the few RFC attributes its bundled dictionary knows (issue #10).
 FROM freeradius/freeradius-server:3.2.10-alpine
 
-RUN printf '\nclient proxy {\n\tipaddr = 0.0.0.0/0\n\tsecret = "e2e-backend-secret-not-a-real-one"\n\trequire_message_authenticator = no\n}\n' \
+RUN printf '\nclient proxy {\n\tipaddr = 0.0.0.0/0\n\tsecret = $ENV{AUTHENTIK_RADIUS_SECRET}\n\trequire_message_authenticator = no\n}\n' \
       >> /etc/raddb/clients.conf \
  && f=/etc/raddb/mods-config/files/authorize \
  && { printf 'testuser Cleartext-Password := "testpw"\n\tFilter-Id = "vlan-staff"\n\n'; \

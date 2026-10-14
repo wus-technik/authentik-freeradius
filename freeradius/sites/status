@@ -18,7 +18,7 @@ server status {
 
 	client status {
 		ipaddr = 127.0.0.1
-		secret = "$ENV{RADIUS_HEALTHCHECK_SECRET}"
+		secret = $ENV{RADIUS_HEALTHCHECK_SECRET}
 		require_message_authenticator = yes
 	}
 

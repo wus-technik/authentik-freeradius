@@ -3,6 +3,8 @@ name: akfr-e2e
 services:
   authentik_radius:
     build: ./backend
+    environment:
+      AUTHENTIK_RADIUS_SECRET: 'e2e-backend-"sec\ret%{User-Name} not-a-real-one'
     networks:
       e2e:
         # Fixed, like in production (issue #15).
@@ -37,8 +39,10 @@ services:
         condition: service_started
     environment:
       AUTHENTIK_RADIUS_HOST: 172.28.0.10
-      AUTHENTIK_RADIUS_SECRET: e2e-backend-secret-not-a-real-one
-      RADIUS_SECRET: e2e-uplink-secret-not-a-real-one
+      # Both secrets carry a quote, a backslash, an xlat expression and a
+      # space: radiusd must use them verbatim (see freeradius/clients.conf).
+      AUTHENTIK_RADIUS_SECRET: 'e2e-backend-"sec\ret%{User-Name} not-a-real-one'
+      RADIUS_SECRET: 'e2e-uplink-"sec\ret%{User-Name} not-a-real-one'
       RADIUS_CLIENT_NET: 172.28.0.0/16
       TLS_CERT_PATH: /certs/server.crt
       TLS_KEY_PATH: /certs/server.key
@@ -67,7 +71,7 @@ services:
   client:
     build: ./client
     environment:
-      RADIUS_SECRET: e2e-uplink-secret-not-a-real-one
+      RADIUS_SECRET: 'e2e-uplink-"sec\ret%{User-Name} not-a-real-one'
     networks: [e2e]
     entrypoint: ["/auth.sh"]
 
