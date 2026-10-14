@@ -24,8 +24,9 @@ who may join the WiFi.
 
 ## 3. Outpost
 
-**Applications → Outposts → Create.** Type **RADIUS**, assign the application, and copy the
-token into `AUTHENTIK_TOKEN`.
+**Applications → Outposts → Create.** Type **RADIUS**, assign the application. Open the
+outpost from the list: the card **Outpost Deployment Info** shows its token as
+`AUTHENTIK_TOKEN`. Copy it into `AUTHENTIK_TOKEN` of this stack.
 
 If authentik has Docker socket integration enabled it will try to manage its own outpost
 container. This stack runs the outpost itself, so use an outpost with no service connection
@@ -113,7 +114,8 @@ The blueprint does not create these:
      **Search full LDAP directory**.
 4. **Applications → Outposts → Create**:
    - Type **LDAP**, provider `wlan-ldap`, no service connection.
-   - Copy the token into `AUTHENTIK_LDAP_TOKEN`.
+   - Open the outpost from the list: the card **Outpost Deployment Info** shows its token
+     as `AUTHENTIK_TOKEN`. Copy it into `AUTHENTIK_LDAP_TOKEN` of this stack.
 5. **Directory → Tokens**, token `service-account-svc-wlan-ldap-password` → copy into
    `LDAP_BIND_PASSWORD`.
 6. Deploy with [`docker-compose.peap.yml`](../docker-compose.peap.yml) as an additional
