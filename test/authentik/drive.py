@@ -40,12 +40,12 @@ md4_ns = {}
 exec((ROOT / "authentik" / "src" / "md4.py").read_text(encoding="utf-8"), md4_ns)
 
 
-def api(method, path, data=None, raw=None, ctype="application/json"):
+def api(method, path, data=None, raw=None, ctype="application/json", timeout=TIMEOUT):
     body = raw if raw is not None else (json.dumps(data).encode() if data is not None else None)
     req = urllib.request.Request(f"{BASE}/api/v3{path}", method=method, data=body,
                                  headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": ctype})
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             text = resp.read()
             return json.loads(text) if text else {}
     except urllib.error.HTTPError as exc:
@@ -64,7 +64,10 @@ def import_blueprint():
     boundary = uuid.uuid4().hex
     body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"wlan-passwort.yaml\"\r\n"
             "Content-Type: application/x-yaml\r\n\r\n").encode() + content + f"\r\n--{boundary}--\r\n".encode()
-    result = api("POST", "/managed/blueprints/import/", raw=body, ctype=f"multipart/form-data; boundary={boundary}")
+    #  The import applies the whole blueprint inside the request; on a cold
+    #  server that alone has taken longer than TIMEOUT.
+    result = api("POST", "/managed/blueprints/import/", raw=body, ctype=f"multipart/form-data; boundary={boundary}",
+                 timeout=300)
     if not result.get("success"):
         #  The log starts with one "Created Event" per object; only the
         #  warnings and errors say why the import failed.
