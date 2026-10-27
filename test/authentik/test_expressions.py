@@ -186,6 +186,16 @@ class SaveTest(unittest.TestCase):
         self.assertEqual(self.user.saves, [["attributes"]])
         self.assertNotIn("wifi_password_pending", self.session)
 
+    def test_drops_the_passphrase_from_prompt_data(self):
+        data = {"wifi_password": "acid-acorn-acre-acts-afar-affix", "wifi_ack": True}
+        self.assertTrue(self.run_save(data))
+        self.assertEqual(data, {"wifi_ack": True})
+
+    def test_refusal_leaves_prompt_data_alone(self):
+        data = {"wifi_password": "attacker-chosen", "wifi_ack": True}
+        self.assertFalse(self.run_save(data))
+        self.assertIn("wifi_password", data)
+
     def test_keeps_other_attributes(self):
         self.user.attributes["settings"] = {"locale": "de"}
         self.run_save({"wifi_password": "acid-acorn-acre-acts-afar-affix", "wifi_ack": True})
@@ -219,6 +229,21 @@ class SaveTest(unittest.TestCase):
                     data["wifi_ack"] = ack
                 self.assertFalse(self.run_save(data))
                 self.assertNotIn("wifi-password-nthash", self.user.attributes)
+
+    def test_refuses_when_another_session_saved_meanwhile(self):
+        # Both sessions made a passphrase against base ""; the other one saved first.
+        self.user.attributes["wifi-password-set-at"] = "2026-10-13T00:00:00+00:00"
+        self.user.attributes["wifi-password-nthash"] = "OTHER"
+        self.assertFalse(self.run_save({"wifi_password": "acid-acorn-acre-acts-afar-affix", "wifi_ack": True}))
+        self.assertEqual(self.user.attributes["wifi-password-nthash"], "OTHER")
+        self.assertEqual(self.user.saves, [])
+        self.assertTrue(self.messages)
+
+    def test_saves_over_a_matching_base(self):
+        self.user.attributes["wifi-password-set-at"] = "2026-10-13T00:00:00+00:00"
+        self.session["wifi_password_pending"]["base"] = "2026-10-13T00:00:00+00:00"
+        self.assertTrue(self.run_save({"wifi_password": "acid-acorn-acre-acts-afar-affix", "wifi_ack": True}))
+        self.assertNotEqual(self.user.attributes["wifi-password-set-at"], "2026-10-13T00:00:00+00:00")
 
     def test_nothing_pending(self):
         self.session.clear()

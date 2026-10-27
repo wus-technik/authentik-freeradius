@@ -23,25 +23,36 @@ accepted() {
 		sleep 3
 	done
 }
-notfound() {
-	"${COMPOSE[@]}" logs freeradius 2>&1 | grep -c "peap: no active WLAN user with a WiFi password: $1\$" || true
+# reasons <user>: how often FreeRADIUS logged each refusal reason for <user>,
+# as "<directory> <password>".
+reasons() {
+	local log
+	log="$("${COMPOSE[@]}" logs freeradius 2>&1)"
+	printf '%s %s\n' \
+		"$(grep -c "peap: no active WLAN user with a WiFi password: $1\$" <<<"$log" || true)" \
+		"$(grep -c "peap: wrong WiFi password: $1\$" <<<"$log" || true)"
 }
 # rejected directory|password <user> <password> <what>: PEAP must end in an
 # Access-Reject, not in a failing client or container, and for the stated
-# reason. directory: the LDAP filter found no active WLAN user (its log line).
-# password: the user was found and MSCHAPv2 refused the password.
+# reason, each with its own log line. directory: the LDAP filter found no
+# active WLAN user. password: the user was found and MSCHAPv2 refused the
+# password. An unreachable outpost logs neither, so it cannot pass as either.
 rejected() {
-	local before after out rc=0
-	before="$(notfound "$2")"
+	local before after out rc=0 dir0 pw0 dir1 pw1
+	before="$(reasons "$2")"
 	out="$("${COMPOSE[@]}" run --rm --quiet-pull -e AUTH_METHOD=peap -e AUTH_USER="$2" \
 		-e AUTH_PASSWORD="$3" -e AUTH_DUMP=1 client 2>&1)" || rc=$?
 	[ "$rc" -ne 0 ] || fail "PEAP accepted $4"
 	grep -q 'code=3 (Access-Reject)' <<<"$out" \
 		|| fail "PEAP with $4 failed without an Access-Reject: $(tail -3 <<<"$out")"
-	after="$(notfound "$2")"
+	after="$(reasons "$2")"
+	read -r dir0 pw0 <<<"$before"
+	read -r dir1 pw1 <<<"$after"
 	case "$1" in
-		directory) [ "$after" -gt "$before" ] || fail "PEAP refused $4, but not in the directory lookup" ;;
-		password) [ "$after" -eq "$before" ] || fail "PEAP refused $4 in the directory lookup, not on the password" ;;
+		directory) [ "$dir1" -gt "$dir0" ] && [ "$pw1" -eq "$pw0" ] \
+			|| fail "PEAP refused $4, but not in the directory lookup (directory/password lines $before -> $after)" ;;
+		password) [ "$pw1" -gt "$pw0" ] && [ "$dir1" -eq "$dir0" ] \
+			|| fail "PEAP refused $4, but not on the password (directory/password lines $before -> $after)" ;;
 	esac
 }
 
@@ -76,15 +87,32 @@ python3 -I drive.py denied outsider it-user-pw-0123456789 || fail "a user outsid
 
 echo "== PEAP with the generated password =="
 pw1="$(cat .state/pw1)"
+"${COMPOSE[@]}" exec -T -e WIFI_PW="$pw1" server ak shell <session_check.py \
+	|| fail "the saved WiFi password stays in the session"
 accepted peapuser "$pw1" "PEAP with the generated password was rejected"
 rejected password peapuser wrong-password "a wrong password"
 rejected password peapuser it-user-pw-0123456789 "the SSO password"
 
-echo "== deactivation applies at once =="
+echo "== deactivation applies at the next login =="
 python3 -I drive.py active peapuser 0
 rejected directory peapuser "$pw1" "a deactivated user"
 python3 -I drive.py active peapuser 1
 accepted peapuser "$pw1" "PEAP refused the reactivated user"
+
+echo "== the WLAN group and the hash are both required =="
+#  outsider gets a valid hash without the flow; the accepted login in the
+#  middle shows the hash works, so each refusal is about group or hash.
+outpw=acid-acorn-acre-acts-afar-affix
+python3 -I drive.py sethash outsider "$outpw"
+rejected directory outsider "$outpw" "a user with a hash outside the WLAN group"
+python3 -I drive.py group outsider 1
+accepted outsider "$outpw" "PEAP refused a WLAN member with a valid hash"
+python3 -I drive.py group outsider 0
+rejected directory outsider "$outpw" "a user removed from the WLAN group"
+python3 -I drive.py group outsider 1
+python3 -I drive.py clearhash outsider
+rejected directory outsider "$outpw" "a WLAN member without a WiFi password"
+python3 -I drive.py group outsider 0
 
 echo "== a new password replaces the old one =="
 python3 -I drive.py flow peapuser it-user-pw-0123456789 .state/pw2
@@ -119,6 +147,7 @@ out="$(ldap_search peapuser it-user-pw-0123456789)" || rc=$?
 [ "$rc" -ne 0 ] || fail "an ordinary user could bind to the wlan-ldap provider"
 grep -q 'Insufficient access (50)' <<<"$out" \
 	|| fail "the bind of an ordinary user failed, but not with Insufficient access: $out"
+python3 -I drive.py nobrowserbind || fail "the LDAP bind flow runs in a browser"
 
 echo
 echo "PASS: authentik integration checks succeeded"

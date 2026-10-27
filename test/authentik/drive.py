@@ -13,6 +13,9 @@
                                  saved passphrase stays; write it to <out>
     denied <user> <pw>           exit 0 if the flow refuses this user
     active <user> 0|1            deactivate / reactivate
+    group <user> 0|1             remove from / add to the WLAN group
+    sethash <user> <passphrase>  store the hash directly, without the flow
+    clearhash <user>             delete the hash, as the helpdesk would
     nohash <user> <hash>         exit 0 if no event contains this value;
                                  fail unless the flow's save event for <user>
                                  is in the log
@@ -174,8 +177,8 @@ def flow(user, password, outfile):
     if c["component"] != "ak-stage-prompt" or not shown:
         sys.exit(f"no passphrase shown: {c}")
     info = field(c, "wifi_info") or ""
-    if "WLAN" not in info or "radius.example.com" not in info:
-        sys.exit(f"info field does not show SSID and certificate name: {info!r}")
+    if "WLAN" not in info or "radius.example.com" not in info or "Bitwarden" not in info:
+        sys.exit(f"info field does not show SSID, certificate name and password manager: {info!r}")
     if field(b.executor("wlan-passwort"), "wifi_password") != shown:
         sys.exit("a re-render showed a different passphrase")
     before = stored_hash(user)
@@ -224,9 +227,42 @@ def denied(user, password):
     sys.exit(0 if c["component"] == "ak-stage-access-denied" else f"flow not refused: {c['component']}")
 
 
+def nobrowserbind():
+    """The LDAP bind flow is for the outpost only; a browser must not get to
+    the identification stage, or it would be a login without MFA."""
+    b = Browser()
+    b.opener.open(f"{BASE}/if/flow/wlan-ldap-bind/", timeout=TIMEOUT).read()
+    c = b.executor("wlan-ldap-bind")
+    sys.exit(0 if c["component"] == "ak-stage-access-denied" else f"browser got the bind flow: {c['component']}")
+
+
 def active(user, flag):
     pk = one(f"/core/users/?username={user}")["pk"]
     api("PATCH", f"/core/users/{pk}/", {"is_active": flag == "1"})
+
+
+def group(user, flag):
+    pk = one(f"/core/users/?username={user}")["pk"]
+    wlan = one("/core/groups/?name=wlan")["pk"]
+    api("POST", f"/core/groups/{wlan}/{'add_user' if flag == '1' else 'remove_user'}/", {"pk": pk})
+
+
+def set_attribute(user, key, value):
+    found = one(f"/core/users/?username={user}")
+    attributes = dict(found.get("attributes") or {})
+    if value is None:
+        attributes.pop(key, None)
+    else:
+        attributes[key] = value
+    api("PATCH", f"/core/users/{found['pk']}/", {"attributes": attributes})
+
+
+def sethash(user, passphrase):
+    set_attribute(user, "wifi-password-nthash", nt_hash(passphrase))
+
+
+def clearhash(user):
+    set_attribute(user, "wifi-password-nthash", None)
 
 
 def all_events():
@@ -265,5 +301,6 @@ def nohash(user, value):
 if __name__ == "__main__":
     STATE.mkdir(exist_ok=True)
     cmd, args = sys.argv[1], sys.argv[2:]
-    {"setup": setup, "flow": flow, "staletab": staletab, "denied": denied, "active": active,
+    {"setup": setup, "flow": flow, "staletab": staletab, "denied": denied, "nobrowserbind": nobrowserbind,
+     "active": active, "group": group, "sethash": sethash, "clearhash": clearhash,
      "nohash": nohash}[cmd](*args)

@@ -14,6 +14,7 @@ context:
   ldap_search_group: wlan-ldap-search
   ssid: WLAN
   radius_server_name: radius.example.com
+  password_manager: Bitwarden
   # authentik accepts only an absolute launch URL for the portal tile.
   authentik_url: https://authentik.example.com
   ldap_base_dn: dc=ldap,dc=goauthentik,dc=io
@@ -61,16 +62,17 @@ entries:
       required: false
       order: 1
       initial_value: !Format
-        - "WLAN: %s. Benutzername: dein authentik-Benutzername. Beim ersten Verbinden fragt das Gerät nach einem Zertifikat: bestätige es nur, wenn es auf %s lautet. Das Passwort wird nur jetzt angezeigt."
+        - "WLAN: %s. Benutzername: dein authentik-Benutzername. Beim ersten Verbinden fragt das Gerät nach einem Zertifikat: bestätige es nur, wenn es auf %s lautet. Das Passwort wird nur jetzt angezeigt: speichere es gleich in %s."
         - !Context ssid
         - !Context radius_server_name
+        - !Context password_manager
   - model: authentik_stages_prompt.prompt
     id: prompt-ack
     identifiers:
       name: wlan-passwort-bestaetigung
     attrs:
       field_key: wifi_ack
-      label: Ich habe das Passwort notiert. Mein bisheriges WLAN-Passwort wird damit ungültig.
+      label: Ich habe das Passwort gespeichert. Mein bisheriges WLAN-Passwort wird damit ungültig.
       type: checkbox
       required: true
       order: 2
@@ -151,6 +153,9 @@ entries:
       name: WLAN LDAP bind
       title: WLAN LDAP bind
       designation: authentication
+      # Only the outpost may run this flow; in a browser it would be a login
+      # without the MFA of the regular authentication flow.
+      authentication: require_outpost
   - model: authentik_flows.flowstagebinding
     identifiers:
       target: !KeyOf flow-ldap-bind

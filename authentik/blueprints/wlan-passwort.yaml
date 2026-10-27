@@ -14,6 +14,7 @@ context:
   ldap_search_group: wlan-ldap-search
   ssid: WLAN
   radius_server_name: radius.example.com
+  password_manager: Bitwarden
   # authentik accepts only an absolute launch URL for the portal tile.
   authentik_url: https://authentik.example.com
   ldap_base_dn: dc=ldap,dc=goauthentik,dc=io
@@ -87,7 +88,7 @@ entries:
 
         data = request.context.get("prompt_data") or {}
         if data.get("wifi_ack") is not True:
-            ak_message("Bitte bestätige, dass du das Passwort notiert hast.")
+            ak_message("Bitte bestätige, dass du das Passwort gespeichert hast.")
             return False
         password = data.get("wifi_password")
         pending = request.http_request.session.get("wifi_password_pending") or {}
@@ -97,6 +98,10 @@ entries:
         try:
             with transaction.atomic():
                 fresh = User.objects.select_for_update().get(pk=request.user.pk)
+                # Another session saved since this passphrase was made: keep that one.
+                if (fresh.attributes or {}).get("wifi-password-set-at", "") != pending.get("base"):
+                    ak_message("Das WLAN-Passwort wurde inzwischen neu gesetzt. Bitte lade die Seite neu.")
+                    return False
                 fresh.attributes["wifi-password-nthash"] = md4(password.encode("utf-16-le")).hex().upper()
                 fresh.attributes["wifi-password-set-at"] = datetime.now(timezone.utc).isoformat()
                 fresh.save(update_fields=["attributes"])
@@ -107,8 +112,13 @@ entries:
         # The password is stored from here on; nothing below may turn that into a
         # refusal. A pending value left behind is harmless: the generate expression
         # drops it once wifi-password-set-at has moved on.
+        #
+        # prompt_data is the dict the prompt stage then copies into the flow plan, and
+        # the executor keeps a copy of every plan in the session's flow history after
+        # the flow ends. Dropping the passphrase here keeps it out of both.
         try:
             request.http_request.session.pop("wifi_password_pending", None)
+            data.pop("wifi_password", None)
             ak_logger.info("wifi password set", user=fresh.username)
         except Exception as exc:
             ak_logger.warning("wifi password set, session not cleared", exc=repr(exc))
@@ -163,16 +173,17 @@ entries:
       required: false
       order: 1
       initial_value: !Format
-        - "WLAN: %s. Benutzername: dein authentik-Benutzername. Beim ersten Verbinden fragt das Gerät nach einem Zertifikat: bestätige es nur, wenn es auf %s lautet. Das Passwort wird nur jetzt angezeigt."
+        - "WLAN: %s. Benutzername: dein authentik-Benutzername. Beim ersten Verbinden fragt das Gerät nach einem Zertifikat: bestätige es nur, wenn es auf %s lautet. Das Passwort wird nur jetzt angezeigt: speichere es gleich in %s."
         - !Context ssid
         - !Context radius_server_name
+        - !Context password_manager
   - model: authentik_stages_prompt.prompt
     id: prompt-ack
     identifiers:
       name: wlan-passwort-bestaetigung
     attrs:
       field_key: wifi_ack
-      label: Ich habe das Passwort notiert. Mein bisheriges WLAN-Passwort wird damit ungültig.
+      label: Ich habe das Passwort gespeichert. Mein bisheriges WLAN-Passwort wird damit ungültig.
       type: checkbox
       required: true
       order: 2
@@ -253,6 +264,9 @@ entries:
       name: WLAN LDAP bind
       title: WLAN LDAP bind
       designation: authentication
+      # Only the outpost may run this flow; in a browser it would be a login
+      # without the MFA of the regular authentication flow.
+      authentication: require_outpost
   - model: authentik_flows.flowstagebinding
     identifiers:
       target: !KeyOf flow-ldap-bind
