@@ -4,3 +4,10 @@ linelog peap_log_notfound {
 	filename = /dev/stdout
 	format = "peap: no active WLAN user with a WiFi password: %{User-Name}"
 }
+
+#  The log line for a PEAP login where the user was found but MSCHAPv2
+#  refused the password. An unreachable LDAP outpost logs neither line.
+linelog peap_log_badpass {
+	filename = /dev/stdout
+	format = "peap: wrong WiFi password: %{User-Name}"
+}

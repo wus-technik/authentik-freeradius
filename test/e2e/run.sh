@@ -189,6 +189,8 @@ for u in peapinactive peapnogroup peapnohash; do
 	grep -qE "peap: no active WLAN user with a WiFi password: ${u}[[:space:]]*\$" <<<"$peap_log" \
 		|| fail "no log line for the refused PEAP login of $u"
 done
+grep -qE "peap: wrong WiFi password: peapuser[[:space:]]*\$" <<<"$peap_log" \
+	|| fail "no log line for the wrong PEAP password of peapuser"
 # User-Name goes into an LDAP filter; metacharacters must not widen it.
 for u in '*' 'peapuser)(cn=*' 'peap*'; do
 	peap_refused "$u" e2e-peap-pw

@@ -22,8 +22,17 @@ server peap-inner-tunnel {
 		Auth-Type inner-eap {
 			inner-eap
 		}
-		#  eap_mschapv2 calls "Auth-Type mschap", which only a bare mschap
-		#  creates. "Auth-Type MS-CHAP" alone rejects every password.
-		mschap
+		#  eap_mschapv2 calls "Auth-Type mschap"; the section must carry that
+		#  name. "Auth-Type MS-CHAP" alone rejects every password. reject = 1
+		#  lets the section go on to log the refusal instead of returning.
+		Auth-Type mschap {
+			mschap {
+				reject = 1
+			}
+			if (reject) {
+				peap_log_badpass
+				reject
+			}
+		}
 	}
 }

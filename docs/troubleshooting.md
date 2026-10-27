@@ -111,6 +111,10 @@ repoints the `live/` symlinks, so a file mount pins the old inode.
 directory had no match: the user is deactivated, not in the WLAN group, has no WiFi
 password yet, or typed a different username. EAP-TTLS is unaffected.
 
+**PEAP login refused, `peap: wrong WiFi password: <user>`** — the user was found, but the
+password does not match the stored WiFi password: a typo, the SSO password instead of the
+WiFi password, or a device still using a password that has since been replaced.
+
 **PEAP refused, `rlm_ldap … failed: Can't contact LDAP server`** — the LDAP outpost is
 down or not at `AUTHENTIK_LDAP_IP`. PEAP fails within seconds; EAP-TTLS keeps working. The
 connection pool reconnects by itself once the outpost is back.
