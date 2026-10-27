@@ -8,14 +8,17 @@
 |---|---|
 | Name | `radius-wifi` |
 | Authorization flow | an explicit-consent-free flow, e.g. `default-authentication-flow` |
-| Client Networks | the Docker network the FreeRADIUS container sits on, e.g. `172.16.0.0/12` |
+| Client Networks | the value of `RADIUS_NET_SUBNET` — the `radius` network FreeRADIUS sends from |
 | Shared secret | the value of `AUTHENTIK_RADIUS_SECRET` |
 
 The shared secret **must** match `AUTHENTIK_RADIUS_SECRET` in the stack exactly. A mismatch
 shows up as `No provider found` with a `hashed_secret` field in the outpost log.
 
 Client Networks refers to the FreeRADIUS container's address, not the access points'. The
-APs never talk to authentik directly.
+APs never talk to authentik directly. Avoid broad ranges such as `172.16.0.0/12`: they
+admit every container of every stack on the host. A request from outside Client Networks
+is dropped without an answer or a log line — see
+[troubleshooting](troubleshooting.md#symptoms).
 
 ## 2. Application
 

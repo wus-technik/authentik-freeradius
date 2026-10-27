@@ -58,7 +58,15 @@ for development only.
 3. Make sure the host has a certificate for the RADIUS server name and that
    `LETSENCRYPT_DIR` is readable by Docker.
 4. Leave `RADIUS_NET_SUBNET` at its default unless it collides with a network on the
-   host. Both outposts get fixed addresses inside it; nothing depends on DNS.
+   host. Both outposts get fixed addresses inside it; nothing depends on DNS. To check,
+   list the subnets of all networks on the host and look for any that contains
+   `RADIUS_NET_SUBNET`, including larger ones such as a `/16` — the network names alone
+   do not show it:
+
+   ```bash
+   docker network inspect $(docker network ls -q) \
+     --format '{{.Name}} {{range .IPAM.Config}}{{.Subnet}} {{end}}'
+   ```
 5. Deploy, then follow [docs/authentik.md](docs/authentik.md) and
    [docs/unifi.md](docs/unifi.md).
 

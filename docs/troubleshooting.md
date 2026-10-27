@@ -102,6 +102,17 @@ docker network rm <stack>_radius
 In Portainer: stop the stack, delete the `<stack>_radius` network under **Networks**,
 then deploy. Check the result with `docker network inspect <stack>_radius`.
 
+After the upgrade FreeRADIUS sends from an address on the new `radius` network. Set
+**Client Networks** of the RADIUS provider in authentik to `RADIUS_NET_SUBNET` — otherwise
+the outpost silently drops every inner request and EAP-TTLS stops working, see the next
+entry.
+
+**Inner requests time out, nothing in the outpost log** — the outpost drops requests from
+addresses outside the provider's **Client Networks** without answering and without logging
+anything. `radclient` (see [Test only the outpost half](#test-only-the-outpost-half))
+shows `No reply from server`. Set Client Networks to `RADIUS_NET_SUBNET`. FreeRADIUS has no
+fixed address of its own, so the subnet is the value that survives a container recreate.
+
 **Authentication stopped working weeks after deployment** — the certificate was renewed and
 the container is still serving the old one. Set `CERT_RELOAD_WATCH=true`, and confirm
 `LETSENCRYPT_DIR` mounts the whole tree rather than individual `.pem` files: certbot
