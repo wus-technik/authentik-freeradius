@@ -16,12 +16,14 @@ Erfolg heißt:
 
 - Ein Nutzer der WLAN-Gruppe holt sich im authentik-Portal ein WLAN-Passwort und verbindet
   damit jedes seiner Geräte ohne weitere Vorbereitung.
-- Deaktivieren in authentik oder Entfernen aus der WLAN-Gruppe sperrt ihn **sofort**.
+- Deaktivieren in authentik oder Entfernen aus der WLAN-Gruppe sperrt ihn **bei der nächsten
+  Anmeldung**, ohne Cache dazwischen. Schon verbundene Geräte bleiben verbunden, bis sie sich
+  neu anmelden; ein Disconnect-Request (RFC 5176) ist nicht Teil dieser Spec.
 - Bestehende TTLS/PAP-Clients funktionieren unverändert weiter, **auch wenn der LDAP-Outpost
   ausgefallen ist** – beim laufenden Betrieb wie beim Start und Neustart von FreeRADIUS.
 - Eine Bestandsinstallation ohne die neue Option verhält sich exakt wie heute.
 
-## 2. Entscheidungen (mit Christian abgestimmt)
+## 2. Entscheidungen (mit dem Maintainer abgestimmt)
 
 | Frage | Entscheidung |
 |---|---|
@@ -390,9 +392,9 @@ Basis-Image `freeradius/freeradius-server:3.2.10-alpine` bringt `rlm_ldap`, `rlm
 | Erstes Einrichten | Portal öffnen, Kachel „WLAN-Zugang“, Passwort wird angezeigt, notieren, bestätigen. |
 | Gerät verbinden | SSID wählen, Benutzername und WLAN-Passwort, Zertifikat mit dem angezeigten Namen bestätigen. Android: „Systemzertifikate verwenden“ und Domain eintragen. |
 | Passwort vergessen | Neues im Portal holen. Alle Geräte brauchen dann das neue. |
-| Gerät verloren | Neues Passwort holen; das alte gilt sofort nicht mehr. |
+| Gerät verloren | Neues Passwort holen; das alte gilt ab der nächsten Anmeldung nicht mehr. Ein schon verbundenes Gerät bleibt bis dahin im WLAN. |
 | Helpdesk | Kann nichts sehen und nichts setzen, nur `wifi-password-nthash` löschen. |
-| Austritt | Deaktivieren oder aus der Gruppe nehmen; sofort wirksam. |
+| Austritt | Deaktivieren oder aus der Gruppe nehmen; wirksam ab der nächsten Anmeldung. |
 
 ## 8. Tests
 
@@ -545,7 +547,7 @@ Folgen:
 3. **LDAPS mit Zertifikatsprüfung.** Schützt den Token, aber nicht den TTLS-Pfad, und braucht
    ein Zertifikat am Provider samt CA-Datei für FreeRADIUS.
 
-**Entscheidung (Christian, 2026-10-13): Option 1, feste Adressen**, umgesetzt in § 6.0. Der
+**Entscheidung (Maintainer, 2026-10-13): Option 1, feste Adressen**, umgesetzt in § 6.0. Der
 TTLS-Teil ist als #15 erfasst, weil er schon heute gilt.
 
 ## 12. Standardwerte für den Blueprint-Kontext

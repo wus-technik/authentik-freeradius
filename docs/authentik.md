@@ -91,6 +91,7 @@ generated **WiFi password** in the authentik portal. Their SSO password is not i
 | `wlan_group` | `wlan` | who may get a WiFi password and join; created if missing, never changed |
 | `ssid` | `WLAN` | shown to the user |
 | `radius_server_name` | `radius.example.com` | the certificate name users must confirm |
+| `password_manager` | `Bitwarden` | where the page tells users to store the password |
 | `authentik_url` | `https://authentik.example.com` | absolute URL of your authentik, used for the launch URL of the portal tile (authentik rejects a relative one) |
 | `ldap_search_group` | `wlan-ldap-search` | who may bind to the LDAP provider |
 | `ldap_base_dn` | `dc=ldap,dc=goauthentik,dc=io` | base DN of the LDAP provider |
@@ -139,18 +140,29 @@ PEAP users stay in the SSID's VLAN.
 
 ### What users and the helpdesk do
 
-- **Users:** open **WLAN-Zugang** in the portal, note the six-word password, confirm.
+- **Users:** open **WLAN-Zugang** in the portal, store the six-word password in the password
+  manager, confirm.
   Getting a new one invalidates the old one on every device.
 - **Stale page:** submitting an outdated WiFi password page, for example a second tab after
   a password was already saved, is refused with "Das WLAN-Passwort ist abgelaufen. Bitte
   lade die Seite neu." Reloading the page shows a new password; nothing is saved from the
   stale page.
+- **Known gap:** one case is not caught. Tabs A and B show the same password; B saves it
+  and is reloaded, which shows a new, unsaved password. If A is submitted now, the new
+  password is saved while A still shows the old one, and the password stored from A does
+  not work. authentik replaces the values of read-only and hidden prompt fields with the
+  server's before the validation policy runs, so the server cannot tell which page was
+  submitted. Remedy: fetch a new password in the portal.
 - **Helpdesk:** cannot read a WiFi password back, because the passphrase itself is never
   stored. The hash is a plain user attribute, though: anyone who may edit user attributes
   can replace it, and the blueprint does not restrict that. Deleting
   `wifi-password-nthash` on the user locks WiFi until the user fetches a new one.
 - **Leavers:** deactivating the user, or removing them from `wlan`, refuses the next
-  login. No cache is involved: the provider runs in `direct` mode.
+  login. No cache is involved: the provider runs in `direct` mode. A device that is already
+  connected stays connected until it authenticates again (reconnect, roaming, or the
+  session timeout the access points enforce); nothing sends a Disconnect-Request. The same
+  holds for a replaced WiFi password. To cut off a lost device at once, disconnect it on
+  the access point or controller.
 
 ### Security
 
@@ -165,7 +177,8 @@ PEAP users stay in the SSID's VLAN.
   can record the exchange and recover the NT hash offline (about 2^56 DES operations).
   Tell users the certificate name; managed devices should still get a profile.
 - The plaintext passphrase sits in the user's session until it is saved or the session
-  expires.
+  expires. On saving, the flow also drops it from the prompt data, so the flow history
+  authentik keeps in the session does not hold it either (checked by the integration test).
 - Only the `wlan-passwort` flow may write `wifi-password-nthash`. Do not add a prompt field
   named `attributes.wifi-password-*` to any user-facing flow (enrollment, profile edit):
   users could then set the hash to a value of their choosing and the guarantee is gone.

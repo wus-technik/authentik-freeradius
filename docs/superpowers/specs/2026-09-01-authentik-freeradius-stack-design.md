@@ -584,7 +584,7 @@ before implementation.
 
 - **Licence.** The repository has no `LICENSE`. Its ancestor `tknv/docker-radius-eap-ttls`
   no longer exists on GitHub, so its licence terms cannot be established. Adding a licence
-  is Christian's decision, not one to make silently; no `LICENSE` file is added by this
+  is the maintainer's decision, not one to make silently; no `LICENSE` file is added by this
   work. Consequently the Dockerfile omits the `org.opencontainers.image.licenses` label
   rather than asserting a licence that has not been chosen.
 - **Credential exposure is inherent to this design, not incidental.** EAP-TTLS/PAP means

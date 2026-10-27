@@ -15,8 +15,8 @@
 
 ## Global Constraints
 
-- Branch: `feat/peap-wlan-passwort` von `develop`. Kein Push und kein PR ohne ausdrückliches Okay von Christian.
-- Commit-Messages auf Deutsch. Jede endet mit einer Leerzeile und `Claude-Session: https://claude.ai/code/session_0121b3AM2hP1mx8TPxGAJ1sN`. Kein Co-Author-Trailer. Issue-Bezug im Body: `Closes #15` (Task 1), sonst `Refs #14`.
+- Branch: `feat/peap-wlan-passwort` von `develop`. Kein Push und kein PR ohne ausdrückliches Okay des Maintainers.
+- Commit-Messages auf Deutsch. Jede endet mit dem Session-Trailer der Sitzung. Kein Co-Author-Trailer. Issue-Bezug im Body: `Closes #15` (Task 1), sonst `Refs #14`.
 - **Sprache:**
   - Code-Kommentare, Log-Zeilen und die Repo-Doku unter `docs/` und im README bleiben Englisch, wie alle bestehenden Dateien.
   - Für Nutzer sichtbare authentik-Texte (Prompt-Labels, Meldungen) und die Rundmail-Vorlage sind Deutsch.
@@ -337,9 +337,7 @@ Hosts weitergereicht, der eine fremde Adresse liefern kann. Der Adress-
 Watcher hätte radiusd dann darauf festgelegt. Das Netz bekommt ein festes
 Subnetz, der Outpost eine feste Adresse, der Entrypoint verlangt eine IP.
 
-Closes #15
-
-Claude-Session: https://claude.ai/code/session_0121b3AM2hP1mx8TPxGAJ1sN"
+Closes #15"
 ```
 
 ---
@@ -748,9 +746,7 @@ git commit -m "feat: PEAP-MSCHAPv2 per PEAP_ENABLE zuschaltbar
 Eigener innerer Virtual Server, ldap-Modul gegen den authentik-LDAP-
 Outpost, Einbindung über generierte Include-Dateien. Standard bleibt aus.
 
-Refs #14
-
-Claude-Session: https://claude.ai/code/session_0121b3AM2hP1mx8TPxGAJ1sN"
+Refs #14"
 ```
 
 ---
@@ -1028,9 +1024,7 @@ richtiges und falsches Passwort, die drei Sperrgründe, Sonderzeichen im
 Benutzernamen, Ausfall und Rückkehr von LDAP ohne Neustart von radiusd
 und dass nichts aus dem inneren Tunnel nach außen gelangt.
 
-Refs #14
-
-Claude-Session: https://claude.ai/code/session_0121b3AM2hP1mx8TPxGAJ1sN"
+Refs #14"
 ```
 
 ---
@@ -1132,9 +1126,7 @@ Expected: Beide `config`-Aufrufe laufen, der ohne Token scheitert erwartungsgem�
 git add docker-compose.peap.yml .env.example .github/workflows/build.yml
 git commit -m "feat: Compose-Zusatzdatei für PEAP mit LDAP-Outpost
 
-Refs #14
-
-Claude-Session: https://claude.ai/code/session_0121b3AM2hP1mx8TPxGAJ1sN"
+Refs #14"
 ```
 
 ---
@@ -1793,9 +1785,7 @@ Validierungs-Policy speichert den NT-Hash. Dazu LDAP-Provider mit eigenem
 Bind-Flow. Der Blueprint wird aus authentik/src/ erzeugt; Unit-Tests
 prüfen MD4, Passphrase und Policy.
 
-Refs #14
-
-Claude-Session: https://claude.ai/code/session_0121b3AM2hP1mx8TPxGAJ1sN"
+Refs #14"
 ```
 
 ---
@@ -2245,9 +2235,7 @@ Bestätigung, PEAP über den echten LDAP-Outpost, Deaktivierung, Wechsel
 des Passworts, Event-Log und LDAP-Bind normaler Nutzer. Manuell per
 workflow_dispatch.
 
-Refs #14
-
-Claude-Session: https://claude.ai/code/session_0121b3AM2hP1mx8TPxGAJ1sN"
+Refs #14"
 ```
 
 ---
@@ -2475,9 +2463,7 @@ Expected: keine Ausgabe.
 git add docs README.md
 git commit -m "docs: WLAN-Passwort für PEAP, Clients ohne Profil, Rundmail
 
-Refs #14
-
-Claude-Session: https://claude.ai/code/session_0121b3AM2hP1mx8TPxGAJ1sN"
+Refs #14"
 ```
 
 ---
@@ -2500,11 +2486,11 @@ Expected: alles grün, beide Suites mit `PASS`.
 
 `docs/superpowers/specs/2026-10-13-peap-wlan-passwort-design.md`: jede Abweichung eintragen, die die Tasks im Commit-Text genannt haben (etwa die Ausweichlösung für `linelog` oder geänderte Blueprint-Felder), mit einer Zeile in § 13. Gibt es keine, entfällt der Schritt. Commit mit `Refs #14`.
 
-- [ ] **Step 3: Übergabe an Christian**
+- [ ] **Step 3: Übergabe an den Maintainer**
 
 Melden:
 - was erledigt ist, mit Commit-Liste und Testergebnissen
 - dass die Gerätetests (spec § 8.4) noch ausstehen
 - dass #14 deshalb offen bleibt
 
-Push und PR (`feat/peap-wlan-passwort` → `develop`) nur auf sein Okay. Der PR-Text endet mit `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
+Push und PR (`feat/peap-wlan-passwort` → `develop`) nur auf dessen Okay. Der PR-Text endet mit `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
