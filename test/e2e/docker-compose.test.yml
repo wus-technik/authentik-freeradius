@@ -39,11 +39,14 @@ services:
         condition: service_started
     environment:
       AUTHENTIK_RADIUS_HOST: 172.28.0.10
-      # Both secrets carry a quote, a backslash, an xlat expression and a
+      # The secrets carry a quote, a backslash, an xlat expression and a
       # space: radiusd must use them verbatim (see freeradius/clients.conf).
       AUTHENTIK_RADIUS_SECRET: 'e2e-backend-"sec\ret%{User-Name} not-a-real-one'
-      RADIUS_SECRET: 'e2e-uplink-"sec\ret%{User-Name} not-a-real-one'
-      RADIUS_CLIENT_NET: 172.28.0.0/16
+      # Two networks, two sites, no RADIUS_SECRET (issue #4). The client
+      # container always gets an address from ip_range, so it is in "clients".
+      RADIUS_CLIENT_NET: 172.28.0.0/17=infra, 172.28.128.0/17=clients
+      RADIUS_SITE_SECRETS: 'infra:e2e-infra-site-secret-not-a-real-one,clients:e2e-uplink-"sec\ret%{User-Name} not-a-real-one'
+
       TLS_CERT_PATH: /certs/server.crt
       TLS_KEY_PATH: /certs/server.key
       VLAN_MAP: vlan-staff=20

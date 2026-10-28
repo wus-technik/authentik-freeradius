@@ -244,7 +244,7 @@ The patterns worth alerting on come straight from [troubleshooting.md](troublesh
 | Pattern | Meaning | Severity |
 |---|---|---|
 | `Marking home server .* as dead` with no later `alive` | outpost down; with `status_check = none` it cannot self-revive | Disaster |
-| `invalid Message-Authenticator` | `RADIUS_SECRET` mismatch, or an unconfigured AP | High |
+| `invalid Message-Authenticator` | site secret or `RADIUS_SECRET` mismatch, or an unconfigured AP | High |
 | `Ignoring request .* from unknown client` | AP outside `RADIUS_CLIENT_NET` | Warning |
 | `entrypoint: ` | startup validation failed; the container is about to exit | High |
 | `certificate changed, restarting radiusd` | informational — confirms the renewal watcher fired | Information |

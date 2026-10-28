@@ -94,18 +94,17 @@ jobs:
           set -euo pipefail
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
             -subj '/CN=radius.ci.test' -keyout key.pem -out cert.pem
+          #  Through the entrypoint: it writes the client blocks (issue #4).
           docker run --rm \
             -v "$PWD/cert.pem:/certs/cert.pem:ro" \
             -v "$PWD/key.pem:/certs/key.pem:ro" \
             -e RADIUS_CLIENT_NET=10.0.0.0/8 \
             -e RADIUS_SECRET='se/cret&with\weird$chars' \
-            -e RADIUS_HEALTHCHECK_SECRET=dummy \
             -e AUTHENTIK_RADIUS_HOST=127.0.0.1 \
-            -e AUTHENTIK_RADIUS_SECRET='an/other&secret' \
+            -e AUTHENTIK_RADIUS_SECRET='an/other&secret-for-ci' \
             -e TLS_CERT_PATH=/certs/cert.pem \
             -e TLS_KEY_PATH=/certs/key.pem \
-            --entrypoint /opt/sbin/radiusd \
-            akfr:ci -XC -d /etc/raddb 2>&1 | tee radiusd.log
+            akfr:ci -XC 2>&1 | tee radiusd.log
           grep -q 'Configuration appears to be OK' radiusd.log
           ! grep -qiE 'no longer necessary|Failed resolving' radiusd.log
 

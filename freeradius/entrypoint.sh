@@ -14,28 +14,29 @@ die() {
 	exit 1
 }
 
-for var in RADIUS_SECRET AUTHENTIK_RADIUS_SECRET RADIUS_CLIENT_NET AUTHENTIK_RADIUS_HOST; do
+for var in AUTHENTIK_RADIUS_SECRET RADIUS_CLIENT_NET AUTHENTIK_RADIUS_HOST; do
 	eval "value=\${$var:-}"
 	[ -n "$value" ] || die "required environment variable $var is unset or empty"
 done
 
-case "$RADIUS_CLIENT_NET" in
-	0.0.0.0/0|::/0)
-		die "RADIUS_CLIENT_NET must not be $RADIUS_CLIENT_NET - scope it to the AP/controller subnet"
-		;;
-esac
-
-for var in RADIUS_SECRET AUTHENTIK_RADIUS_SECRET; do
-	eval "value=\${$var}"
-	case "$value" in
+# check_secret <name> <value>. Names the secret in its messages, never the value.
+check_secret() {
+	case "$2" in
 		CHANGEME*)
-			die "$var still holds the placeholder from .env.example - generate one with: openssl rand -hex 32"
+			die "$1 still holds the placeholder from .env.example - generate one with: openssl rand -hex 32"
 			;;
 	esac
-	if [ "${#value}" -lt 16 ]; then
-		die "$var must be at least 16 characters (got ${#value})"
+	if [ "${#2}" -lt 16 ]; then
+		die "$1 must be at least 16 characters (got ${#2})"
 	fi
-done
+}
+
+check_secret AUTHENTIK_RADIUS_SECRET "$AUTHENTIK_RADIUS_SECRET"
+# RADIUS_SECRET is optional once every network has a site; write_clients
+# insists on it where it is needed.
+if [ -n "${RADIUS_SECRET:-}" ]; then
+	check_secret RADIUS_SECRET "$RADIUS_SECRET"
+fi
 
 CERT_FILE="${TLS_CERT_PATH:-/etc/raddb/certs/server.crt}"
 KEY_FILE="${TLS_KEY_PATH:-/etc/raddb/certs/server.key}"
@@ -130,6 +131,111 @@ is_ipv4 "$AUTHENTIK_RADIUS_HOST" \
 if [ -n "${OUTPOST_RESOLVE_INTERVAL:-}" ]; then
 	echo "entrypoint: OUTPOST_RESOLVE_INTERVAL has no effect any more - the outpost has a fixed address" >&2
 fi
+
+# is_net <address or CIDR>: an IPv4 or IPv6 address, optionally with a prefix
+# length. /0 is refused by the caller with its own message.
+is_net() {
+	addr="${1%/*}"
+	if is_ipv4 "$addr"; then
+		max=32
+	else
+		printf '%s\n' "$addr" | grep -qxE '[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*' || return 1
+		max=128
+	fi
+	[ "$addr" != "$1" ] || return 0
+	len="${1##*/}"
+	case "$len" in
+		''|*[!0-9]*|0*) return 1 ;;
+	esac
+	[ "${#len}" -le 3 ] && [ "$len" -le "$max" ]
+}
+
+trim() { printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
+
+# RADIUS_CLIENT_NET="net[=site],..." becomes one client block per network
+# (issue #4). A network with a site uses that site's secret from
+# RADIUS_SITE_SECRETS="site:secret,..."; one without uses RADIUS_SECRET. The
+# secrets still never touch the filesystem: each site's is exported as
+# RADIUS_SITE_SECRET_<site> and the generated file only names it. No message
+# below prints a secret.
+write_clients() {
+	out=/run/radiusd/clients-uplink.conf
+	sites=" "
+	used=" "
+	seen=" "
+	body=""
+	n=0
+	old_ifs="$IFS"
+	set -f
+	IFS=','
+	for entry in ${RADIUS_SITE_SECRETS:-}; do
+		entry="$(trim "$entry")"
+		[ -n "$entry" ] || continue
+		case "$entry" in
+			*:*) ;;
+			*) die "RADIUS_SITE_SECRETS: expected site:secret, separated by commas" ;;
+		esac
+		site="$(trim "${entry%%:*}")"
+		secret="${entry#*:}"
+		printf '%s\n' "$site" | grep -qxE '[A-Za-z0-9_]{1,32}' \
+			|| die "RADIUS_SITE_SECRETS: site name '$site' - use 1-32 of A-Z a-z 0-9 _"
+		case "$sites" in
+			*" $site "*) die "RADIUS_SITE_SECRETS: site '$site' is listed twice" ;;
+		esac
+		check_secret "the secret of site '$site' in RADIUS_SITE_SECRETS" "$secret"
+		export "RADIUS_SITE_SECRET_$site=$secret"
+		sites="$sites$site "
+	done
+
+	for entry in $RADIUS_CLIENT_NET; do
+		entry="$(trim "$entry")"
+		[ -n "$entry" ] || continue
+		net="$(trim "${entry%%=*}")"
+		site=""
+		[ "$net" = "$entry" ] || site="$(trim "${entry#*=}")"
+		case "$net" in
+			*/0) die "RADIUS_CLIENT_NET must not contain $net - scope it to the AP/controller subnets" ;;
+		esac
+		is_net "$net" || die "RADIUS_CLIENT_NET: '$net' is not an IPv4/IPv6 address or network"
+		case "$seen" in
+			*" $net "*) die "RADIUS_CLIENT_NET lists $net twice" ;;
+		esac
+		seen="$seen$net "
+		if [ -z "$site" ]; then
+			[ -n "${RADIUS_SECRET:-}" ] \
+				|| die "RADIUS_CLIENT_NET: $net names no site, so RADIUS_SECRET is required"
+			ref=RADIUS_SECRET
+		else
+			case "$sites" in
+				*" $site "*) ;;
+				*) die "RADIUS_CLIENT_NET: site '$site' of $net has no secret in RADIUS_SITE_SECRETS" ;;
+			esac
+			ref="RADIUS_SITE_SECRET_$site"
+			used="$used$site "
+		fi
+		n=$((n + 1))
+		# shellcheck disable=SC2016 # literal FreeRADIUS $ENV{} reference
+		body="$body$(printf 'client uplink%s {
+	ipaddr = %s
+	secret = $ENV{%s}
+	require_message_authenticator = yes
+}' "$n" "$net" "$ref")
+"
+		echo "entrypoint: RADIUS client $net, secret ${site:+of site }${site:-RADIUS_SECRET}" >&2
+	done
+	IFS="$old_ifs"
+	set +f
+
+	[ "$n" -gt 0 ] || die "RADIUS_CLIENT_NET lists no network"
+	for site in $sites; do
+		case "$used" in
+			*" $site "*) ;;
+			*) die "RADIUS_SITE_SECRETS: site '$site' has no network in RADIUS_CLIENT_NET" ;;
+		esac
+	done
+	printf '%s' "$body" > "$out"
+}
+write_clients
 
 # PEAP_ENABLE=true adds PEAP-MSCHAPv2 against the authentik LDAP outpost
 # (issue #14). The modules live in /etc/raddb/peap/, outside mods-enabled/,

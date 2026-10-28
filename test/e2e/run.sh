@@ -15,7 +15,7 @@ COMPOSE=(docker compose -f docker-compose.test.yml)
 REVIVE_WAIT="${REVIVE_WAIT:-75}"
 
 cleanup() {
-	docker rm -f akfr-e2e-nopeap >/dev/null 2>&1 || true
+	docker rm -f akfr-e2e-nopeap akfr-e2e-outside >/dev/null 2>&1 || true
 	"${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -184,6 +184,54 @@ for port in 0 03389 65536 99999999999999999999; do
 done
 echo "   ok"
 
+echo "== client networks and site secrets the entrypoint must refuse =="
+rejects "RADIUS_CLIENT_NET must not contain 0.0.0.0/0" "RADIUS_CLIENT_NET=172.28.0.0/17=infra,0.0.0.0/0=infra"
+rejects "RADIUS_CLIENT_NET must not contain ::/0" "RADIUS_CLIENT_NET=::/0=infra"
+for net in 172.28.0.0/33 172.28.0.256/24 172.28.0.0/ 172.28.0.0/017 radius.example.com; do
+	rejects "RADIUS_CLIENT_NET: '$net' is not an IPv4/IPv6 address or network" "RADIUS_CLIENT_NET=$net=infra"
+done
+rejects "RADIUS_CLIENT_NET lists 172.28.0.0/17 twice" "RADIUS_CLIENT_NET=172.28.0.0/17=infra,172.28.0.0/17=infra"
+rejects "RADIUS_CLIENT_NET lists no network" "RADIUS_CLIENT_NET= , "
+rejects "172.28.0.0/17 names no site, so RADIUS_SECRET is required" "RADIUS_CLIENT_NET=172.28.0.0/17"
+rejects "site 'nosuch' of 172.28.0.0/17 has no secret in RADIUS_SITE_SECRETS" "RADIUS_CLIENT_NET=172.28.0.0/17=nosuch"
+rejects "RADIUS_SITE_SECRETS: site 'infra' has no network in RADIUS_CLIENT_NET" "RADIUS_CLIENT_NET=172.28.128.0/17=clients"
+rejects "RADIUS_SITE_SECRETS: expected site:secret" "RADIUS_SITE_SECRETS=infra"
+rejects "RADIUS_SITE_SECRETS: site name 'in-fra'" "RADIUS_SITE_SECRETS=in-fra:e2e-infra-site-secret-not-a-real-one"
+rejects "RADIUS_SITE_SECRETS: site 'infra' is listed twice" "RADIUS_SITE_SECRETS=infra:e2e-infra-site-secret-not-a-real-one,infra:e2e-infra-site-secret-not-a-real-two"
+rejects "the secret of site 'infra' in RADIUS_SITE_SECRETS still holds the placeholder" "RADIUS_SITE_SECRETS=infra:CHANGEME-run-openssl-rand-hex-32,clients:e2e-uplink-secret-not-a-real-one"
+rejects "the secret of site 'clients' in RADIUS_SITE_SECRETS must be at least 16 characters" "RADIUS_SITE_SECRETS=infra:e2e-infra-site-secret-not-a-real-one,clients:tooshort-1"
+# The refusal names the site, never the secret.
+if grep -qF tooshort-1 <<<"$out"; then fail "the entrypoint printed a site secret: $out"; fi
+echo "   ok"
+
+echo "== each network uses its own site's secret =="
+# The client sits in "clients"; the secret of "infra" must not work for it.
+# No answer, not a reject: radiusd drops a packet with a wrong secret.
+since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if auth -e RADIUS_SECRET=e2e-infra-site-secret-not-a-real-one -e AUTH_TIMEOUT=5; then
+	fail "the secret of site infra was accepted from the clients network"
+fi
+"${COMPOSE[@]}" logs --since "$since" freeradius 2>&1 | grep -qi 'Message-Authenticator' \
+	|| fail "no Message-Authenticator error logged for the wrong site secret"
+# No secret ever reaches the log.
+if "${COMPOSE[@]}" logs freeradius 2>&1 | grep -qF 'not-a-real-one'; then
+	fail "a secret appears in the freeradius log"
+fi
+echo "   ok"
+
+echo "== a network outside RADIUS_CLIENT_NET is ignored =="
+"${COMPOSE[@]}" run -d --no-deps --name akfr-e2e-outside \
+	-e RADIUS_CLIENT_NET=172.28.0.0/17=infra \
+	-e RADIUS_SITE_SECRETS=infra:e2e-infra-site-secret-not-a-real-one freeradius >/dev/null
+sleep 10
+if auth -e AUTH_TARGET=akfr-e2e-outside -e AUTH_TIMEOUT=5; then
+	fail "a client outside every network in RADIUS_CLIENT_NET was answered"
+fi
+docker logs akfr-e2e-outside 2>&1 | grep -q 'unknown client' \
+	|| fail "no 'unknown client' line for a client outside RADIUS_CLIENT_NET"
+docker rm -f akfr-e2e-outside >/dev/null
+echo "   ok"
+
 peap() { auth -e AUTH_METHOD=peap -e AUTH_USER="$1" -e AUTH_PASSWORD="$2"; }
 
 # peap_refused <user> <password> [docker compose run args]: the attempt must end
@@ -297,13 +345,15 @@ done
 [ "$(started_at freeradius)" = "$before" ] || fail "radiusd restarted after the LDAP outpost was recreated"
 echo "   ok"
 
-echo "== PEAP and USERNAME_STRIP_* switched off =="
+echo "== PEAP and USERNAME_STRIP_* switched off, one network without sites =="
 # A dedicated container with PEAP_ENABLE=false and no LDAP variables at all:
-# PEAP must be refused, EAP-TTLS must work as before (spec 8.1).
+# PEAP must be refused, EAP-TTLS must work as before (spec 8.1). It also runs
+# the single-network form without sites, as every deployment before issue #4.
 "${COMPOSE[@]}" run -d --no-deps --name akfr-e2e-nopeap \
 	-e PEAP_ENABLE=false -e LDAP_HOST= -e LDAP_BASE_DN= -e LDAP_BIND_DN= \
 	-e LDAP_BIND_PASSWORD= -e LDAP_WLAN_GROUP_DN= -e USERNAME_STRIP_DOMAIN=false \
-	-e USERNAME_STRIP_NTDOMAIN=false freeradius >/dev/null
+	-e USERNAME_STRIP_NTDOMAIN=false -e RADIUS_CLIENT_NET=172.28.0.0/16 -e RADIUS_SITE_SECRETS= \
+	-e 'RADIUS_SECRET=e2e-uplink-"sec\ret%{User-Name} not-a-real-one' freeradius >/dev/null
 deadline=$(( $(date +%s) + 60 ))
 until auth -e AUTH_TARGET=akfr-e2e-nopeap; do
 	[ "$(date +%s)" -lt "$deadline" ] || fail "EAP-TTLS failed against the container with PEAP switched off"

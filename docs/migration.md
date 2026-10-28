@@ -38,9 +38,18 @@ all sharing one secret. Do not carry that over:
   estate.
 - Scope each client as tightly as the controller architecture allows.
 
-This stack currently takes a **single** `RADIUS_CLIENT_NET`. If the old server has more
-than one active client network — and a multi-site WiFi almost always does — that is a
-hard blocker, tracked as [#4](https://github.com/wus-technik/authentik-freeradius/issues/4).
+`RADIUS_CLIENT_NET` takes a comma-separated list, and each network can name a site whose
+secret comes from `RADIUS_SITE_SECRETS`
+([#4](https://github.com/wus-technik/authentik-freeradius/issues/4)):
+
+```
+RADIUS_CLIENT_NET=10.1.0.0/24=hq,10.1.1.0/24=hq,10.2.0.0/24=branch
+RADIUS_SITE_SECRETS=hq:<openssl rand -hex 32>,branch:<openssl rand -hex 32>
+```
+
+A network without `=site` uses `RADIUS_SECRET`. Each UniFi site then gets its own RADIUS
+profile with its own secret — see [unifi.md](unifi.md#one-secret-per-site) for the profile
+and the order in which to switch a live site.
 
 ## The certificate is the real work
 

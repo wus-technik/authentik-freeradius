@@ -55,11 +55,15 @@ Access-Accept means authentik and the outpost are fine and the problem is in the
 
 ## Symptoms
 
-**`Ignoring request ... from unknown client`** — the AP's address is outside
-`RADIUS_CLIENT_NET`.
+**`Ignoring request ... from unknown client`** — the AP's address is outside every network
+in `RADIUS_CLIENT_NET`. The APs send from their own management address, not from the
+controller; behind NAT, FreeRADIUS sees the translated one.
 
 **`Received packet ... with invalid Message-Authenticator! (Shared secret is incorrect.)`**
-— `RADIUS_SECRET` does not match the UniFi RADIUS profile.
+— the secret in the UniFi RADIUS profile does not match the one FreeRADIUS uses for that
+AP's network: the secret of its site in `RADIUS_SITE_SECRETS`, or `RADIUS_SECRET` for a
+network without a site. The startup log names which one each network uses
+(`entrypoint: RADIUS client <net>, secret of site <site>`).
 
 **`No provider found` with `hashed_secret` in the outpost log** — `AUTHENTIK_RADIUS_SECRET`
 does not match the shared secret on authentik's RADIUS provider.
