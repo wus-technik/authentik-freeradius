@@ -298,6 +298,13 @@ for u in '*' 'peapuser)(cn=*' 'peap*' '*@example.com' 'peap*@example.com' 'peapu
 done
 echo "   ok"
 
+echo "== a client without a fixed method gets PEAP =="
+# iOS and macOS without a profile take the first method offered and speak
+# EAP-MSCHAPv2 inside any tunnel. With PEAP on, that must be PEAP; TTLS would
+# reject them. The TTLS stages above prove TTLS clients still get TTLS.
+auth -e AUTH_METHOD=auto || fail "a client without a fixed EAP method was not offered PEAP"
+echo "   ok"
+
 echo "== nothing from inside the PEAP tunnel reaches the access point =="
 accept="$("${COMPOSE[@]}" run --rm --quiet-pull -e AUTH_METHOD=peap -e AUTH_DUMP=1 client 2>/dev/null \
 	| sed -n '/code=2 (Access-Accept)/,/^[^ ]/p')"
@@ -382,6 +389,15 @@ peap_refused peapuser e2e-peap-pw -e AUTH_TARGET=akfr-e2e-nopeap
 # This container also runs with both USERNAME_STRIP_* off: the domain stays.
 ttls_refused testuser@example.com -e AUTH_TARGET=akfr-e2e-nopeap
 ttls_refused 'EXAMPLE\testuser' -e AUTH_TARGET=akfr-e2e-nopeap
+# Without PEAP the client that takes any method is offered TTLS, speaks EAP
+# inside and must be refused with a log line that says why.
+rc=0
+out="$("${COMPOSE[@]}" run --rm --quiet-pull -e AUTH_TARGET=akfr-e2e-nopeap -e AUTH_METHOD=auto \
+	-e AUTH_DUMP=1 client 2>&1)" || rc=$?
+[ "$rc" -ne 0 ] || fail "TTLS accepted inner EAP"
+grep -q 'code=3 (Access-Reject)' <<<"$out" || fail "inner EAP in TTLS failed without an Access-Reject"
+docker logs akfr-e2e-nopeap 2>&1 | grep -qE 'ttls: inner EAP instead of PAP, .*: peapuser[[:space:]]*$' \
+	|| fail "no log line for inner EAP in the TTLS tunnel"
 docker rm -f akfr-e2e-nopeap >/dev/null
 echo "   ok"
 

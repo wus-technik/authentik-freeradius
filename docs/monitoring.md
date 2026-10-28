@@ -293,6 +293,7 @@ The patterns worth alerting on come straight from [troubleshooting.md](troublesh
 | `rlm_ldap .* failed: Invalid credentials` | PEAP service account token wrong or expired; every PEAP login fails | High |
 | `rlm_ldap .* failed: Can't contact LDAP server` | LDAP outpost down; PEAP fails, EAP-TTLS unaffected | High |
 | `peap: no active WLAN user with a WiFi password` | a refused PEAP login; many in a short time point at a rollout gap | Information |
+| `ttls: inner EAP instead of PAP` | a device without a TTLS profile took TTLS; with PEAP enabled this should not occur | Warning |
 | `peap: wrong WiFi password` | a PEAP login with an outdated or mistyped WiFi password; one user repeating it is usually a device with the old password | Information |
 
 The first deserves the highest severity in the set: it is unrecoverable without a restart.

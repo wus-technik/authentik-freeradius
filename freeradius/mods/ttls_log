@@ -1,0 +1,6 @@
+#  The log line for a client that speaks EAP inside the TTLS tunnel instead of
+#  PAP: a device without a TTLS profile. Without it the reject leaves no trace.
+linelog ttls_log_inner_eap {
+	filename = /dev/stdout
+	format = "ttls: inner EAP instead of PAP, the device needs a TTLS profile or PEAP: %{User-Name}"
+}

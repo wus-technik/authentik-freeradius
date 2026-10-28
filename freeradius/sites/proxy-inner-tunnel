@@ -13,6 +13,14 @@ server proxy-inner-tunnel {
             }
         }
 
+        #  Only PAP can reach authentik. A client speaking EAP in here --
+        #  iOS or macOS without a profile -- otherwise fails with nothing in
+        #  the log.
+        if (!&User-Password && &EAP-Message) {
+            ttls_log_inner_eap
+            reject
+        }
+
         if (&User-Password) {
             update control { Proxy-To-Realm := "authentik" }
         }

@@ -10,6 +10,7 @@ LABEL org.opencontainers.image.title="authentik-freeradius" \
 COPY freeradius/radiusd.conf /etc/raddb/radiusd.conf
 COPY freeradius/clients.conf /etc/raddb/clients.conf
 COPY freeradius/mods/eap /etc/raddb/mods-available/eap
+COPY freeradius/mods/ttls_log /etc/raddb/mods-enabled/ttls_log
 COPY freeradius/sites/site /etc/raddb/sites-available/site
 COPY freeradius/sites/proxy-inner-tunnel /etc/raddb/sites-available/proxy-inner-tunnel
 COPY freeradius/sites/status /etc/raddb/sites-available/status

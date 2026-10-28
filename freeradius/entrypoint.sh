@@ -244,6 +244,8 @@ write_peap_includes() {
 	modules=/run/radiusd/peap-modules.conf
 	eap=/run/radiusd/peap-eap.conf
 	site=/run/radiusd/peap-site.conf
+	EAP_DEFAULT_TYPE=ttls
+	export EAP_DEFAULT_TYPE
 	case "${PEAP_ENABLE:-false}" in
 		false)
 			: > "$modules"
@@ -294,7 +296,9 @@ write_peap_includes() {
 	printf '$INCLUDE /etc/raddb/peap/eap-peap\n' > "$eap"
 	# shellcheck disable=SC2016 # literal FreeRADIUS directive
 	printf '$INCLUDE /etc/raddb/peap/peap-inner-tunnel\n' > "$site"
-	echo "entrypoint: PEAP-MSCHAPv2 enabled, LDAP outpost at $LDAP_HOST:$LDAP_PORT" >&2
+	# Offered first; see default_eap_type in mods/eap.
+	EAP_DEFAULT_TYPE=peap
+	echo "entrypoint: PEAP-MSCHAPv2 enabled and offered first, LDAP outpost at $LDAP_HOST:$LDAP_PORT" >&2
 }
 write_peap_includes
 

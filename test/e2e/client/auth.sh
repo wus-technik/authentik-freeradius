@@ -1,6 +1,6 @@
 #!/bin/sh
 # One EAP authentication attempt. Exit 0 on Access-Accept, non-zero otherwise.
-#   AUTH_METHOD    ttls (default) or peap
+#   AUTH_METHOD    ttls (default), peap, or auto (no fixed method, like iOS)
 #   AUTH_USER      inner identity (default testuser / peapuser)
 #   AUTH_PASSWORD  inner password (default: the one in the profile)
 #   AUTH_TARGET    host to authenticate against (default freeradius)
@@ -20,6 +20,7 @@ fi
 case "${AUTH_METHOD:-ttls}" in
 	ttls) profile=/ttls.conf user="${AUTH_USER:-testuser}" ;;
 	peap) profile=/peap.conf user="${AUTH_USER:-peapuser}" ;;
+	auto) profile=/auto.conf user="${AUTH_USER:-peapuser}" ;;
 	*)
 		echo "auth.sh: unknown AUTH_METHOD '${AUTH_METHOD}'" >&2
 		exit 2

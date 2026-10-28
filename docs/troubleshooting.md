@@ -122,6 +122,12 @@ the container is still serving the old one. Set `CERT_RELOAD_WATCH=true`, and co
 `LETSENCRYPT_DIR` mounts the whole tree rather than individual `.pem` files: certbot
 repoints the `live/` symlinks, so a file mount pins the old inode.
 
+**Refused, `ttls: inner EAP instead of PAP, the device needs a TTLS profile or PEAP:
+<user>`** — the device took EAP-TTLS without a profile that sets PAP inside the tunnel;
+iOS and macOS do that when they join an SSID by hand. With `PEAP_ENABLE=true` such devices
+are offered PEAP first and do not get here. Without PEAP, they need a `.mobileconfig`
+with `TTLSInnerAuthentication` = `PAP` ([clients.md](clients.md)).
+
 **PEAP login refused, `peap: no active WLAN user with a WiFi password: <user>`** — the
 directory had no match: the user is deactivated, not in the WLAN group, has no WiFi
 password yet, or typed a different username. EAP-TTLS is unaffected. A name with a

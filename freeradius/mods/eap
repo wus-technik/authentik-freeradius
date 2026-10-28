@@ -1,5 +1,10 @@
 eap {
-	default_eap_type = ttls
+	#  peap with PEAP_ENABLE=true, ttls otherwise; set by entrypoint.sh. A
+	#  client that takes whatever is offered -- iOS and macOS without a
+	#  profile -- must be offered PEAP, or it accepts TTLS, speaks EAP inside
+	#  the tunnel and is rejected. Clients with a TTLS profile NAK PEAP and
+	#  get TTLS as before.
+	default_eap_type = $ENV{EAP_DEFAULT_TYPE}
 
 	tls-config tls-common {
 
