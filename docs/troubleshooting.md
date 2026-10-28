@@ -120,7 +120,9 @@ repoints the `live/` symlinks, so a file mount pins the old inode.
 
 **PEAP login refused, `peap: no active WLAN user with a WiFi password: <user>`** — the
 directory had no match: the user is deactivated, not in the WLAN group, has no WiFi
-password yet, or typed a different username. EAP-TTLS is unaffected.
+password yet, or typed a different username. EAP-TTLS is unaffected. A name with a
+domain (`jdoe@example.com`, `EXAMPLE\jdoe`) is found only with `USERNAME_STRIP_DOMAIN` or
+`USERNAME_STRIP_NTDOMAIN` switched on; the log line shows the name as the client sent it.
 
 **PEAP login refused, `peap: wrong WiFi password: <user>`** — the user was found, but the
 password does not match the stored WiFi password: a typo, the SSO password instead of the

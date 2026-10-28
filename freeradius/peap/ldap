@@ -16,11 +16,12 @@ ldap {
 	}
 
 	#  One filter decides everything: active, in the WLAN group, has a WiFi
-	#  password. rlm_ldap escapes User-Name here; the group DN is inserted at
+	#  password. rlm_ldap escapes the name here; the group DN is inserted at
 	#  parse time and is restricted to safe characters by entrypoint.sh.
+	#  Stripped-User-Name is set by username_strip_domain (issue #8).
 	user {
 		base_dn = "${..base_dn}"
-		filter = "(&(cn=%{User-Name})(ak-active=TRUE)(memberOf=$ENV{LDAP_WLAN_GROUP_DN})(wifi-password-nthash=*))"
+		filter = "(&(cn=%{%{Stripped-User-Name}:-%{User-Name}})(ak-active=TRUE)(memberOf=$ENV{LDAP_WLAN_GROUP_DN})(wifi-password-nthash=*))"
 	}
 
 	options {

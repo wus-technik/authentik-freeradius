@@ -48,6 +48,8 @@ services:
       CERT_RELOAD_WATCH: ${CERT_RELOAD_WATCH:-false}
       CERT_RELOAD_INTERVAL: ${CERT_RELOAD_INTERVAL:-3600}
       VLAN_MAP: ${VLAN_MAP:-}
+      USERNAME_STRIP_DOMAIN: ${USERNAME_STRIP_DOMAIN:-false}
+      USERNAME_STRIP_NTDOMAIN: ${USERNAME_STRIP_NTDOMAIN:-false}
       FREERADIUS_ENABLE_DEBUG: ${FREERADIUS_ENABLE_DEBUG:-false}
     volumes:
       #  The whole tree, read-only. certbot repoints live/ symlinks at new

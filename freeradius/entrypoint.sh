@@ -192,6 +192,25 @@ write_peap_includes() {
 }
 write_peap_includes
 
+# USERNAME_STRIP_DOMAIN=true accepts "user@any.domain" as "user",
+# USERNAME_STRIP_NTDOMAIN=true "ANYDOMAIN\user" (issue #8).
+# policy.d/username_domain reads both through $ENV{}; only the two literal
+# values may reach that comparison.
+USERNAME_STRIP_DOMAIN="${USERNAME_STRIP_DOMAIN:-false}"
+USERNAME_STRIP_NTDOMAIN="${USERNAME_STRIP_NTDOMAIN:-false}"
+for var in USERNAME_STRIP_DOMAIN USERNAME_STRIP_NTDOMAIN; do
+	eval "value=\${$var}"
+	case "$value" in
+		true|false) ;;
+		*) die "$var must be true or false (got '$value')" ;;
+	esac
+done
+[ "$USERNAME_STRIP_DOMAIN" = false ] \
+	|| echo "entrypoint: usernames of the form user@domain are looked up as user" >&2
+[ "$USERNAME_STRIP_NTDOMAIN" = false ] \
+	|| echo "entrypoint: usernames of the form DOMAIN\user are looked up as user" >&2
+export USERNAME_STRIP_DOMAIN USERNAME_STRIP_NTDOMAIN
+
 if [ "${CERT_RELOAD_WATCH:-false}" = "true" ]; then
 	case "${CERT_RELOAD_INTERVAL:-3600}" in
 		''|*[!0-9]*)

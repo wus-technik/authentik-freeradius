@@ -1,0 +1,32 @@
+#  Domain parts users type in front of or behind their username (issue #8):
+#
+#    USERNAME_STRIP_DOMAIN=true    "jdoe@any.domain" is looked up as "jdoe"
+#    USERNAME_STRIP_NTDOMAIN=true  "ANYDOMAIN\jdoe"  is looked up as "jdoe"
+#
+#  The domain is ignored, whichever it is -- only switch these on where
+#  usernames are unique across every domain users might type.
+#
+#  The result goes into Stripped-User-Name; User-Name keeps what the client
+#  sent. PEAP needs that: MSCHAPv2 hashes the name the client typed (for
+#  DOMAIN\user, mschap's with_ntdomain_hack drops the domain itself), so
+#  rewriting User-Name there rejects every password. Exactly one separator
+#  with something on both sides; any other name is left alone and fails the
+#  lookup.
+#
+#  $ENV{} is expanded when the policy is parsed; entrypoint.sh has already
+#  refused anything but true and false.
+username_strip_domain {
+	update request {
+		&Stripped-User-Name !* ANY
+	}
+	if (("$ENV{USERNAME_STRIP_DOMAIN}" == "true") && (&User-Name =~ /^([^@\\]+)@[^@\\]+$/)) {
+		update request {
+			&Stripped-User-Name := "%{1}"
+		}
+	}
+	elsif (("$ENV{USERNAME_STRIP_NTDOMAIN}" == "true") && (&User-Name =~ /^[^@\\]+\\([^@\\]+)$/)) {
+		update request {
+			&Stripped-User-Name := "%{1}"
+		}
+	}
+}

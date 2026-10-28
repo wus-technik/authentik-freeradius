@@ -14,6 +14,7 @@ COPY freeradius/sites/site /etc/raddb/sites-available/site
 COPY freeradius/sites/proxy-inner-tunnel /etc/raddb/sites-available/proxy-inner-tunnel
 COPY freeradius/sites/status /etc/raddb/sites-available/status
 COPY freeradius/peap/ /etc/raddb/peap/
+COPY freeradius/policy/username_domain /etc/raddb/policy.d/username_domain
 COPY freeradius/entrypoint.sh /entrypoint.sh
 COPY freeradius/healthcheck.sh /healthcheck.sh
 

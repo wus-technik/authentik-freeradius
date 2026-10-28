@@ -4,6 +4,15 @@ server proxy-inner-tunnel {
     #  proxied to another RADIUS server.
     #
     authorize {
+        #  Inner PAP carries no hash over the name, so the stripped name can
+        #  simply replace User-Name before it is proxied to authentik.
+        username_strip_domain
+        if (&Stripped-User-Name) {
+            update request {
+                &User-Name := &Stripped-User-Name
+            }
+        }
+
         if (&User-Password) {
             update control { Proxy-To-Realm := "authentik" }
         }

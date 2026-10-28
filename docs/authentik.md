@@ -25,6 +25,29 @@ is dropped without an answer or a log line — see
 Create an application and bind it to the provider. Bind policies or groups here to control
 who may join the WiFi.
 
+**This binding decides who gets onto the WiFi** ([#9](https://github.com/wus-technik/authentik-freeradius/issues/9)).
+Bound to a group, only its members may join; bound to nothing, every authentik user may.
+When replacing a RADIUS that had no user filter at all — common with AD — bind a group
+that holds every employee, not a new, hand-filled WiFi group: the latter locks out
+everybody nobody remembered to add, on the morning of the cutover. For PEAP, use the same
+group as `wlan_group` (section 6). Tighten it afterwards, in its own change.
+
+### Usernames with a domain
+
+authentik matches on the username (EAP-TTLS also on the email). Clients that have
+`jdoe@example.com` or `EXAMPLE\jdoe` saved — often from the server this stack replaces —
+are refused unless FreeRADIUS strips the domain first:
+
+| Variable | Accepts | as |
+|---|---|---|
+| `USERNAME_STRIP_DOMAIN=true` | `jdoe@any.domain` | `jdoe` |
+| `USERNAME_STRIP_NTDOMAIN=true` | `ANYDOMAIN\jdoe` | `jdoe` |
+
+Both default to `false`. The domain is ignored **whichever it is**, so switch them on only
+if a username is unique across every domain your users might type. The password is checked
+as before; only the name is shortened. Names with more than one `@` or `\`, or with both,
+are not touched and fail. Both work for EAP-TTLS and PEAP.
+
 ## 3. Outpost
 
 **Applications → Outposts → Create.** Type **RADIUS**, assign the application. Open the

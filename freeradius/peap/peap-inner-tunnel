@@ -6,6 +6,9 @@ server peap-inner-tunnel {
 		inner-eap {
 			ok = return
 		}
+		#  Only the LDAP lookup uses the stripped name; mschap needs User-Name
+		#  as the client sent it.
+		username_strip_domain
 		#  notfound: inactive, not in the WLAN group, or no WiFi password.
 		#  fail (LDAP unreachable) already ends in a reject.
 		ldap

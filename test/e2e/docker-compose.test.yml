@@ -47,6 +47,8 @@ services:
       TLS_CERT_PATH: /certs/server.crt
       TLS_KEY_PATH: /certs/server.key
       VLAN_MAP: vlan-staff=20
+      USERNAME_STRIP_DOMAIN: "true"
+      USERNAME_STRIP_NTDOMAIN: "true"
       PEAP_ENABLE: "true"
       LDAP_HOST: 172.28.0.11
       LDAP_BASE_DN: dc=ldap,dc=goauthentik,dc=io

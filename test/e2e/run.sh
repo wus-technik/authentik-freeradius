@@ -89,6 +89,27 @@ if grep -q 'Attribute 11 (Filter-Id)' <<<"$mapped"$'\n'"$unmapped"; then
 fi
 echo "   ok"
 
+# ttls_refused <user> [docker compose run args]: the attempt must end in an
+# Access-Reject, not in a client that never got an answer.
+ttls_refused() {
+	local user="$1" out rc=0
+	shift
+	out="$("${COMPOSE[@]}" run --rm --quiet-pull "$@" -e AUTH_USER="$user" -e AUTH_DUMP=1 client 2>&1)" || rc=$?
+	[ "$rc" -ne 0 ] || fail "EAP-TTLS accepted '$user'"
+	grep -q 'code=3 (Access-Reject)' <<<"$out" 		|| fail "EAP-TTLS for '$user' failed without an Access-Reject: $(tail -3 <<<"$out")"
+}
+
+echo "== EAP-TTLS with user@domain and DOMAIN\user (USERNAME_STRIP_*=true) =="
+# The domain is ignored whichever it is (issue #8); the stand-in only knows
+# "testuser", so an Accept proves the name was stripped before proxying.
+for u in testuser@example.com testuser@other.example.org 'EXAMPLE\testuser' 'OTHER\testuser'; do
+	auth -e AUTH_USER="$u" || fail "EAP-TTLS rejected '$u'"
+done
+for u in testuser@ @example.com testuser@a@b "EXAMPLE\\" '\testuser' 'A\B\testuser' 'EXAMPLE\testuser@example.com'; do
+	ttls_refused "$u"
+done
+echo "   ok"
+
 echo "== outage: stopping the outpost =="
 "${COMPOSE[@]}" stop authentik_radius >/dev/null
 
@@ -148,6 +169,9 @@ peap_on=(PEAP_ENABLE=true LDAP_HOST=172.28.0.11
 	"LDAP_BIND_DN=cn=svc-wlan-ldap,ou=users,dc=ldap,dc=goauthentik,dc=io"
 	'LDAP_BIND_PASSWORD=e2e-ldap-"bind\n%{User-Name} not-a-real-one'
 	"LDAP_WLAN_GROUP_DN=cn=wlan,ou=groups,dc=ldap,dc=goauthentik,dc=io")
+rejects "USERNAME_STRIP_DOMAIN must be true or false" USERNAME_STRIP_DOMAIN=yes
+rejects "USERNAME_STRIP_DOMAIN must be true or false" 'USERNAME_STRIP_DOMAIN=true" || "'
+rejects "USERNAME_STRIP_NTDOMAIN must be true or false" USERNAME_STRIP_NTDOMAIN=1
 rejects "PEAP_ENABLE must be true or false" PEAP_ENABLE=yes
 rejects "PEAP_ENABLE=true requires LDAP_BIND_PASSWORD" "${peap_on[@]}" LDAP_BIND_PASSWORD=
 rejects "LDAP_HOST must be a literal IPv4 address" "${peap_on[@]}" LDAP_HOST=authentik_ldap
@@ -191,8 +215,18 @@ for u in peapinactive peapnogroup peapnohash; do
 done
 grep -qE "peap: wrong WiFi password: peapuser[[:space:]]*\$" <<<"$peap_log" \
 	|| fail "no log line for the wrong PEAP password of peapuser"
-# User-Name goes into an LDAP filter; metacharacters must not widen it.
-for u in '*' 'peapuser)(cn=*' 'peap*'; do
+# MSCHAPv2 hashes the name the client typed: the stripped name may only be
+# used for the lookup, or this Accept turns into a wrong-password reject.
+# For DOMAIN\user the client drops the domain before hashing, and so must mschap.
+for u in peapuser@example.com 'EXAMPLE\peapuser'; do
+	peap "$u" e2e-peap-pw || fail "PEAP rejected '$u'"
+	peap_refused "$u" wrong-password
+done
+peap_refused peapinactive@example.com e2e-peap-pw
+peap_refused 'EXAMPLE\peapinactive' e2e-peap-pw
+# User-Name goes into an LDAP filter; metacharacters must not widen it, and
+# neither may they once the domain is stripped off.
+for u in '*' 'peapuser)(cn=*' 'peap*' '*@example.com' 'peap*@example.com' 'peapuser)(cn=*@example.com' 'EXAMPLE\*' 'EXAMPLE\peap*'; do
 	peap_refused "$u" e2e-peap-pw
 done
 echo "   ok"
@@ -263,18 +297,22 @@ done
 [ "$(started_at freeradius)" = "$before" ] || fail "radiusd restarted after the LDAP outpost was recreated"
 echo "   ok"
 
-echo "== PEAP switched off =="
+echo "== PEAP and USERNAME_STRIP_* switched off =="
 # A dedicated container with PEAP_ENABLE=false and no LDAP variables at all:
 # PEAP must be refused, EAP-TTLS must work as before (spec 8.1).
 "${COMPOSE[@]}" run -d --no-deps --name akfr-e2e-nopeap \
 	-e PEAP_ENABLE=false -e LDAP_HOST= -e LDAP_BASE_DN= -e LDAP_BIND_DN= \
-	-e LDAP_BIND_PASSWORD= -e LDAP_WLAN_GROUP_DN= freeradius >/dev/null
+	-e LDAP_BIND_PASSWORD= -e LDAP_WLAN_GROUP_DN= -e USERNAME_STRIP_DOMAIN=false \
+	-e USERNAME_STRIP_NTDOMAIN=false freeradius >/dev/null
 deadline=$(( $(date +%s) + 60 ))
 until auth -e AUTH_TARGET=akfr-e2e-nopeap; do
 	[ "$(date +%s)" -lt "$deadline" ] || fail "EAP-TTLS failed against the container with PEAP switched off"
 	sleep 3
 done
 peap_refused peapuser e2e-peap-pw -e AUTH_TARGET=akfr-e2e-nopeap
+# This container also runs with both USERNAME_STRIP_* off: the domain stays.
+ttls_refused testuser@example.com -e AUTH_TARGET=akfr-e2e-nopeap
+ttls_refused 'EXAMPLE\testuser' -e AUTH_TARGET=akfr-e2e-nopeap
 docker rm -f akfr-e2e-nopeap >/dev/null
 echo "   ok"
 
