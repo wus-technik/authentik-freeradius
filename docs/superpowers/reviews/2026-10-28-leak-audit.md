@@ -28,8 +28,16 @@ Im aktuellen Baum stehen keine Site-Daten. Alle Adressen sind Doku- oder Docker-
 Weder im Baum noch in der Historie fanden sich Credentials, Tokens, echte Secrets, interne
 IP-Adressen, AD-Domains, AP-Namen oder Outpost-UUIDs.
 
-## Außerhalb des Umfangs
+## Nachtrag: Issues und PRs
 
-In den Issues #4 und #7 stehen bekanntermaßen noch echte Subnetze und Hostnamen aus der
-Zeit vor der Public-Repo-Regel. Das braucht eine eigene Entscheidung: Issue-Texte
-bereinigen und die Edit-Historie der Issues prüfen.
+Ein zweiter Scan lief über alle Issue- und PR-Texte und alle Kommentare. Drei Issues
+enthielten Site-Daten aus der Zeit vor der Public-Repo-Regel:
+
+| Issue | Befund | Maßnahme |
+|-------|--------|----------|
+| #4 | WLAN-Domain, echte AP-Subnetze, Standortnamen | Verallgemeinert, Beispielsubnetze eingesetzt |
+| #7 | Organisationsname, Hostname des Edge-Routers | Verallgemeinert |
+| #8 | NetBIOS-Name der AD-Domain im Beispiel-Username | Durch `EXAMPLE` ersetzt |
+
+Die Texte wurden am 2026-10-28 überarbeitet. Die alten Fassungen hat der Maintainer
+danach in der Weboberfläche aus der Edit-Historie gelöscht. Die Kommentare waren sauber.
