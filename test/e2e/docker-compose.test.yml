@@ -18,17 +18,28 @@ services:
         ipv4_address: 172.28.0.11
 
   certgen:
+    # A throwaway CA, a server certificate it signs, and a second CA that
+    # signs nothing here: the client trusts only the first (issue #3).
     build: ./client
     volumes:
       - ./certs:/out
     command:
       - sh
-      - -c
-      - >-
-        test -f /out/server.crt ||
-        openssl req -x509 -newkey rsa:2048 -nodes -days 3650
-        -subj '/CN=radius.e2e.test'
-        -keyout /out/server.key -out /out/server.crt
+      - -ec
+      - |
+        test -f /out/ca.crt && exit 0
+        rm -f /out/*.crt /out/*.key
+        openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+          -subj '/CN=akfr e2e test CA' -keyout /out/ca.key -out /out/ca.crt
+        openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+          -subj '/CN=akfr e2e rogue CA' -keyout /out/rogue-ca.key -out /out/rogue-ca.crt
+        openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+          -CA /out/ca.crt -CAkey /out/ca.key \
+          -subj '/CN=radius.e2e.test' \
+          -addext 'basicConstraints=critical,CA:FALSE' \
+          -addext 'subjectAltName=DNS:radius.e2e.test' \
+          -addext 'extendedKeyUsage=serverAuth' \
+          -keyout /out/server.key -out /out/server.crt
 
   freeradius:
     build:
@@ -77,6 +88,8 @@ services:
     build: ./client
     environment:
       RADIUS_SECRET: 'e2e-uplink-"sec\ret%{User-Name} not-a-real-one'
+    volumes:
+      - ./certs:/certs:ro
     networks: [e2e]
     entrypoint: ["/auth.sh"]
 

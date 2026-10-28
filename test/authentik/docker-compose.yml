@@ -50,7 +50,22 @@ services:
   certgen:
     build: ../e2e/client
     volumes: ["./.state:/out"]
-    command: ["sh", "-c", "test -f /out/server.crt || openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj '/CN=radius.it.test' -keyout /out/server.key -out /out/server.crt"]
+    #  A test CA and a server certificate it signs: the client profiles check
+    #  both (issue #3).
+    command:
+      - sh
+      - -ec
+      - |
+        test -f /out/ca.crt && exit 0
+        openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+          -subj '/CN=akfr it test CA' -keyout /out/ca.key -out /out/ca.crt
+        openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+          -CA /out/ca.crt -CAkey /out/ca.key \
+          -subj '/CN=radius.it.test' \
+          -addext 'basicConstraints=critical,CA:FALSE' \
+          -addext 'subjectAltName=DNS:radius.it.test' \
+          -addext 'extendedKeyUsage=serverAuth' \
+          -keyout /out/server.key -out /out/server.crt
     networks: [it]
 
   freeradius:
@@ -79,6 +94,8 @@ services:
     build: ../e2e/client
     environment:
       RADIUS_SECRET: e2e-uplink-secret-not-a-real-one
+      AUTH_SERVER: radius.it.test
+    volumes: ["./.state:/certs:ro"]
     entrypoint: ["/auth.sh"]
     networks: [it]
 

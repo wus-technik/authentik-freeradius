@@ -64,6 +64,25 @@ echo "== baseline authentication =="
 auth || fail "baseline EAP-TTLS authentication did not succeed"
 echo "   ok"
 
+echo "== the client checks the server certificate =="
+# Both profiles pin the test CA and the server name, as docs/clients.md tells
+# operators to (issue #3). The baseline above is the positive case; here a
+# wrong name and a CA that did not sign the certificate must stop the client
+# in the TLS handshake, before it sends anything from inside the tunnel.
+cert_refused() {
+	local what="$1" out rc=0
+	shift
+	out="$("${COMPOSE[@]}" run --rm --quiet-pull "$@" -e AUTH_DUMP=1 client 2>&1)" || rc=$?
+	[ "$rc" -ne 0 ] || fail "the client accepted the server certificate with $what"
+	grep -q 'CTRL-EVENT-EAP-TLS-CERT-ERROR' <<<"$out" \
+		|| fail "the client failed with $what, but not on the certificate: $(tail -3 <<<"$out")"
+}
+cert_refused "a wrong server name (EAP-TTLS)" -e AUTH_SERVER=other.e2e.test
+cert_refused "a wrong server name (PEAP)" -e AUTH_METHOD=peap -e AUTH_SERVER=other.e2e.test
+cert_refused "an untrusted CA (EAP-TTLS)" -e AUTH_CA=/certs/rogue-ca.crt
+cert_refused "an untrusted CA (PEAP)" -e AUTH_METHOD=peap -e AUTH_CA=/certs/rogue-ca.crt
+echo "   ok"
+
 echo "== dynamic VLAN from Filter-Id =="
 # The stand-in returns Filter-Id the way an authentik property mapping does;
 # VLAN_MAP in docker-compose.test.yml maps vlan-staff to 20 (issue #10).

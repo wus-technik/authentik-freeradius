@@ -5,6 +5,8 @@
 #   AUTH_PASSWORD  inner password (default: the one in the profile)
 #   AUTH_TARGET    host to authenticate against (default freeradius)
 #   AUTH_TIMEOUT   seconds before eapol_test gives up (default 30)
+#   AUTH_CA        CA file the client trusts (default /certs/ca.crt)
+#   AUTH_SERVER    name the server certificate must carry (default radius.e2e.test)
 #   AUTH_DUMP=1    print the full eapol_test log for the caller to read
 set -u
 
@@ -29,6 +31,14 @@ esac
 # arrives verbatim, and the hex digits need no escaping in sed.
 hex() { printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
 sed -e "s/^\([[:space:]]*\)identity=\".*\"/\1identity=$(hex "$user")/" "$profile" >/tmp/profile.conf
+# The certificate check is on in both profiles (issue #3); these only swap the
+# expected values, to prove that a wrong one makes the client give up.
+if [ -n "${AUTH_CA:-}" ]; then
+	sed -i "s|^\([[:space:]]*\)ca_cert=\".*\"|\1ca_cert=\"$AUTH_CA\"|" /tmp/profile.conf
+fi
+if [ -n "${AUTH_SERVER:-}" ]; then
+	sed -i "s/^\([[:space:]]*\)domain_suffix_match=\".*\"/\1domain_suffix_match=\"$AUTH_SERVER\"/" /tmp/profile.conf
+fi
 if [ -n "${AUTH_PASSWORD:-}" ]; then
 	sed -i "s/^\([[:space:]]*\)password=\".*\"/\1password=$(hex "$AUTH_PASSWORD")/" /tmp/profile.conf
 fi
