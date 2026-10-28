@@ -88,6 +88,32 @@ the Docker API (Portainer's `POST /containers/<id>/start`) does **not** work.
 A container list taken immediately after a deploy shows everything as `created`. That is
 the start in progress, not a failure — look again once the outpost reports healthy.
 
+## Upgrading
+
+A Portainer stack that points at this repository picks up `docker-compose.yml` with each
+redeploy, so new variables reach the container. **A copied Compose file does not:** its
+`freeradius` service has an `environment:` block that passes only the variables that
+existed when it was copied. A variable set only in the stack environment then has no
+effect, and because every new variable has a default, nothing reports it.
+
+When upgrading a copied file:
+
+- Compare its `freeradius` (and, with PEAP, `docker-compose.peap.yml`) `environment:`
+  block with the current one and take over the missing lines.
+- If the image is pinned in the file rather than through `IMAGE_TAG`, set the new tag or
+  digest there.
+- Check the startup log. Each feature announces itself:
+
+| Variable | Startup log line |
+|---|---|
+| `RADIUS_CLIENT_NET`, `RADIUS_SITE_SECRETS` | `RADIUS client <net>, secret of site <site>` (or `secret RADIUS_SECRET`), one per network |
+| `USERNAME_STRIP_DOMAIN=true` | `usernames of the form user@domain are looked up as user` |
+| `USERNAME_STRIP_NTDOMAIN=true` | `usernames of the form DOMAIN\user are looked up as user` |
+| `PEAP_ENABLE=true` | `PEAP-MSCHAPv2 enabled and offered first, LDAP outpost at …` |
+| `VLAN_MAP` | `dynamic VLAN enabled for <n> Filter-Id name(s)` |
+
+A line that should be there and is not means the variable never reached the container.
+
 ## Documentation
 
 - [docs/authentik.md](docs/authentik.md) — provider, outpost and token

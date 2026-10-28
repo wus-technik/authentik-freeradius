@@ -85,6 +85,9 @@ def main():
     parser.add_argument("--group", required=True, help="the WLAN group, e.g. the blueprint's wlan_group")
     parser.add_argument("--json", action="store_true", help="print JSON instead of text")
     args = parser.parse_args()
+    #  Names are rarely plain ASCII, and -I ignores PYTHONIOENCODING: on
+    #  Windows the output would otherwise be cp1252.
+    sys.stdout.reconfigure(encoding="utf-8")
     base = os.environ.get("AUTHENTIK_URL", "").rstrip("/")
     token = os.environ.get("AUTHENTIK_API_TOKEN", "")
     if not base or not token:
