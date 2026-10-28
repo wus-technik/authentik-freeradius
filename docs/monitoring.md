@@ -256,6 +256,8 @@ Three things to know when reading them:
 
 Each has one trigger, *Not connected to authentik or metrics unreachable* (High). It fires
 when the outpost reports no connection, and when the agent got no metrics for 5 minutes.
+Tested on a live stack: `docker stop` on the LDAP outpost raised the problem after 301 s,
+`docker start` resolved it 40 s later.
 Set the macros to the addresses in your stack if you changed `RADIUS_NET_SUBNET`.
 
 What this does *not* tell you: the RADIUS outpost only sees requests that already made it
