@@ -260,7 +260,135 @@ zabbix_export:
               tags:
                 - tag: scope
                   value: availability
+        - uuid: 34f9572805aa417d9760c545d241febe
+          name: 'authentik RADIUS outpost: Metrics (raw)'
+          key: 'web.page.get[{$AUTHENTIK.RADIUS.IP},/metrics,9300]'
+          history: '0'
+          value_type: TEXT
+          description: |
+            Prometheus metrics of the authentik RADIUS outpost, read by the agent on the Docker host
+            from the outpost's fixed address on the radius network. No published
+            port is needed; the endpoint is unauthenticated, so keep it that way.
+            The first step strips the HTTP headers web.page.get returns.
+          preprocessing:
+            - type: REGEX
+              parameters:
+                - '\r?\n\r?\n([\s\S]*)'
+                - \1
+          tags:
+            - tag: component
+              value: outpost
+        - uuid: 4c5d86287b0d45d8b7b66c7882c27a80
+          name: 'authentik RADIUS outpost: Connected to authentik'
+          type: DEPENDENT
+          key: authentik.radius.connection
+          description: '1 while the outpost holds its connection to authentik. 0 when it lost it or the metrics could not be parsed.'
+          preprocessing:
+            - type: PROMETHEUS_PATTERN
+              parameters:
+                - authentik_outpost_connection
+                - function
+                - sum
+              error_handler: CUSTOM_VALUE
+              error_handler_params: '0'
+          master_item:
+            key: 'web.page.get[{$AUTHENTIK.RADIUS.IP},/metrics,9300]'
+          tags:
+            - tag: component
+              value: outpost
+          triggers:
+            - uuid: d60e02536fc5452fb92a5a607b0878ee
+              expression: 'max(/authentik-freeradius by Zabbix agent/authentik.radius.connection,5m)=0 or nodata(/authentik-freeradius by Zabbix agent/authentik.radius.connection,5m)=1'
+              name: 'authentik RADIUS outpost: Not connected to authentik or metrics unreachable'
+              priority: HIGH
+              description: |
+                The outpost reports no connection to authentik, or the agent has not
+                read its metrics for 5 minutes (outpost down, address changed in the
+                stack, or {$AUTHENTIK.RADIUS.IP} wrong). Logins through this outpost fail.
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: 984a3722e74c47b384a1f6396bccf9dc
+          name: 'authentik RADIUS outpost: Version'
+          type: DEPENDENT
+          key: authentik.radius.version
+          value_type: CHAR
+          description: 'authentik version of the outpost image. It has to match the authentik server.'
+          preprocessing:
+            - type: PROMETHEUS_PATTERN
+              parameters:
+                - authentik_outpost_info
+                - label
+                - version
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1d
+          master_item:
+            key: 'web.page.get[{$AUTHENTIK.RADIUS.IP},/metrics,9300]'
+          tags:
+            - tag: component
+              value: outpost
+        - uuid: 1c5250c197d142bdba96dd15a29cc547
+          name: 'authentik RADIUS outpost: Memory (RSS)'
+          type: DEPENDENT
+          key: authentik.radius.memory
+          units: B
+          description: 'Resident memory. A steady climb is a leak.'
+          preprocessing:
+            - type: PROMETHEUS_PATTERN
+              parameters:
+                - process_resident_memory_bytes
+                - value
+                - ''
+          master_item:
+            key: 'web.page.get[{$AUTHENTIK.RADIUS.IP},/metrics,9300]'
+          tags:
+            - tag: component
+              value: outpost
+        - uuid: 8db6f1dd66c04e228e894a002c678b0b
+          name: 'authentik RADIUS outpost: Requests per second'
+          type: DEPENDENT
+          key: authentik.radius.requests
+          value_type: FLOAT
+          description: 'Inner PAP requests the outpost handled (EAP-TTLS only). The series appears with the first request; until then 0.'
+          preprocessing:
+            - type: PROMETHEUS_PATTERN
+              parameters:
+                - 'authentik_outpost_radius_request_duration_seconds_count'
+                - function
+                - sum
+              error_handler: CUSTOM_VALUE
+              error_handler_params: '0'
+            - type: CHANGE_PER_SECOND
+          master_item:
+            key: 'web.page.get[{$AUTHENTIK.RADIUS.IP},/metrics,9300]'
+          tags:
+            - tag: component
+              value: outpost
+        - uuid: eff64bc5e25b4f03b4f3fb1b784904f0
+          name: 'authentik RADIUS outpost: Rejects per second'
+          type: DEPENDENT
+          key: authentik.radius.rejects
+          value_type: FLOAT
+          description: 'Requests the outpost refused. A wrong password and an unknown user both count as reason flow_error. The series appears with the first reject; until then 0.'
+          preprocessing:
+            - type: PROMETHEUS_PATTERN
+              parameters:
+                - 'authentik_outpost_radius_requests_rejected_total'
+                - function
+                - sum
+              error_handler: CUSTOM_VALUE
+              error_handler_params: '0'
+            - type: CHANGE_PER_SECOND
+          master_item:
+            key: 'web.page.get[{$AUTHENTIK.RADIUS.IP},/metrics,9300]'
+          tags:
+            - tag: component
+              value: outpost
       macros:
+        - macro: '{$AUTHENTIK.RADIUS.IP}'
+          value: 172.31.253.10
+          description: 'Fixed address of the RADIUS outpost on the radius network (AUTHENTIK_RADIUS_IP). The agent reads its metrics there on port 9300.'
         - macro: '{$FREERADIUS.CERT.CRIT.DAYS}'
           value: '3'
           description: 'Certificate expiry, high severity threshold in days.'
@@ -344,6 +472,149 @@ zabbix_export:
                     - type: STRING
                       name: reference
                       value: BBBBB
+    - uuid: 5252af5c71ce4c57b22ab53566259ded
+      template: 'authentik-freeradius LDAP outpost by Zabbix agent'
+      name: 'authentik-freeradius LDAP outpost by Zabbix agent'
+      description: |
+        Metrics of the authentik LDAP outpost that serves PEAP-MSCHAPv2.
+        Link it next to "authentik-freeradius by Zabbix agent" only on hosts that run docker-compose.peap.yml.
+        Needs no UserParameter: the agent reads the metrics with web.page.get
+        from the outpost's fixed address. See docs/monitoring.md, section 3.
+      vendor:
+        name: 'W&S Technik GmbH'
+        version: 7.4-1
+      groups:
+        - name: Templates/Applications
+      items:
+        - uuid: 95ec90b24f7b4ed384495ab8a1047ec8
+          name: 'authentik LDAP outpost: Metrics (raw)'
+          key: 'web.page.get[{$AUTHENTIK.LDAP.IP},/metrics,9300]'
+          history: '0'
+          value_type: TEXT
+          description: |
+            Prometheus metrics of the authentik LDAP outpost, read by the agent on the Docker host
+            from the outpost's fixed address on the radius network. No published
+            port is needed; the endpoint is unauthenticated, so keep it that way.
+            The first step strips the HTTP headers web.page.get returns.
+          preprocessing:
+            - type: REGEX
+              parameters:
+                - '\r?\n\r?\n([\s\S]*)'
+                - \1
+          tags:
+            - tag: component
+              value: outpost
+        - uuid: 03e6a8e1b3e14d27835cbc94f7df5907
+          name: 'authentik LDAP outpost: Connected to authentik'
+          type: DEPENDENT
+          key: authentik.ldap.connection
+          description: '1 while the outpost holds its connection to authentik. 0 when it lost it or the metrics could not be parsed.'
+          preprocessing:
+            - type: PROMETHEUS_PATTERN
+              parameters:
+                - authentik_outpost_connection
+                - function
+                - sum
+              error_handler: CUSTOM_VALUE
+              error_handler_params: '0'
+          master_item:
+            key: 'web.page.get[{$AUTHENTIK.LDAP.IP},/metrics,9300]'
+          tags:
+            - tag: component
+              value: outpost
+          triggers:
+            - uuid: e810b418e633496c8cfd731d2573772d
+              expression: 'max(/authentik-freeradius LDAP outpost by Zabbix agent/authentik.ldap.connection,5m)=0 or nodata(/authentik-freeradius LDAP outpost by Zabbix agent/authentik.ldap.connection,5m)=1'
+              name: 'authentik LDAP outpost: Not connected to authentik or metrics unreachable'
+              priority: HIGH
+              description: |
+                The outpost reports no connection to authentik, or the agent has not
+                read its metrics for 5 minutes (outpost down, address changed in the
+                stack, or {$AUTHENTIK.LDAP.IP} wrong). Logins through this outpost fail.
+              tags:
+                - tag: scope
+                  value: availability
+        - uuid: 53bfa70c9dad4bfaa84a6e23338463ca
+          name: 'authentik LDAP outpost: Version'
+          type: DEPENDENT
+          key: authentik.ldap.version
+          value_type: CHAR
+          description: 'authentik version of the outpost image. It has to match the authentik server.'
+          preprocessing:
+            - type: PROMETHEUS_PATTERN
+              parameters:
+                - authentik_outpost_info
+                - label
+                - version
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1d
+          master_item:
+            key: 'web.page.get[{$AUTHENTIK.LDAP.IP},/metrics,9300]'
+          tags:
+            - tag: component
+              value: outpost
+        - uuid: 431d6ea01d6941a39bec18d921437ca2
+          name: 'authentik LDAP outpost: Memory (RSS)'
+          type: DEPENDENT
+          key: authentik.ldap.memory
+          units: B
+          description: 'Resident memory. A steady climb is a leak.'
+          preprocessing:
+            - type: PROMETHEUS_PATTERN
+              parameters:
+                - process_resident_memory_bytes
+                - value
+                - ''
+          master_item:
+            key: 'web.page.get[{$AUTHENTIK.LDAP.IP},/metrics,9300]'
+          tags:
+            - tag: component
+              value: outpost
+        - uuid: 82371ccb73464449862cf891d9e43337
+          name: 'authentik LDAP outpost: Binds per second'
+          type: DEPENDENT
+          key: authentik.ldap.binds
+          value_type: FLOAT
+          description: 'Binds of the service account svc-wlan-ldap. FreeRADIUS keeps its connections open, so this stays low.'
+          preprocessing:
+            - type: PROMETHEUS_PATTERN
+              parameters:
+                - 'authentik_outpost_ldap_request_duration_seconds_count{type="bind"}'
+                - function
+                - sum
+              error_handler: CUSTOM_VALUE
+              error_handler_params: '0'
+            - type: CHANGE_PER_SECOND
+          master_item:
+            key: 'web.page.get[{$AUTHENTIK.LDAP.IP},/metrics,9300]'
+          tags:
+            - tag: component
+              value: outpost
+        - uuid: ebe489fe1d164d738b694b50a5a7188a
+          name: 'authentik LDAP outpost: Searches per second'
+          type: DEPENDENT
+          key: authentik.ldap.searches
+          value_type: FLOAT
+          description: 'Two searches per accepted PEAP login, one per refused one. A wrong WiFi password is checked in FreeRADIUS and does not show up here.'
+          preprocessing:
+            - type: PROMETHEUS_PATTERN
+              parameters:
+                - 'authentik_outpost_ldap_request_duration_seconds_count{type="search"}'
+                - function
+                - sum
+              error_handler: CUSTOM_VALUE
+              error_handler_params: '0'
+            - type: CHANGE_PER_SECOND
+          master_item:
+            key: 'web.page.get[{$AUTHENTIK.LDAP.IP},/metrics,9300]'
+          tags:
+            - tag: component
+              value: outpost
+      macros:
+        - macro: '{$AUTHENTIK.LDAP.IP}'
+          value: 172.31.253.11
+          description: 'Fixed address of the LDAP outpost on the radius network (AUTHENTIK_LDAP_IP).'
   triggers:
     - uuid: c2b2c3d4e5f6470880112233445566ac
       expression: |

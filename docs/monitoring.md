@@ -1,7 +1,8 @@
 # Monitoring with Zabbix
 
 Written for **Zabbix 7.4 with agent 2** on the Docker host. Every command and item key
-below was run against a live container from `test/e2e`, except where marked *unverified*.
+below was run against live containers: FreeRADIUS from `test/e2e`, the outposts from
+`test/authentik`.
 
 This stack exposes four independent signals, and they fail in different ways. A healthy
 container proves nothing about whether authentication works.
@@ -10,7 +11,7 @@ container proves nothing about whether authentication works.
 |---|---|---|
 | 1. Container health | Docker API, agent 2 | crash loops, `entrypoint:` validation failures, outpost unable to reach authentik |
 | 2. RADIUS statistics | `radclient` against the status listener | radiusd not answering; auth/reject/proxy counters; dead air |
-| 3. Outpost metrics | Prometheus endpoint on `:9300` | outpost → authentik HTTP problems |
+| 3. Outpost metrics | Prometheus endpoint on `:9300`, read by the agent | outpost lost its connection to authentik; request and reject rates |
 | 4. Container logs | json-file or syslog | dead home server, unknown client, wrong shared secret |
 
 Plus certificate expiry, the most likely cause of a silent outage weeks after a working
@@ -111,9 +112,10 @@ a value, not as a red item nobody looks at.
 ### Import the template
 
 [`contrib/zabbix/template_authentik_freeradius.yaml`](../contrib/zabbix/template_authentik_freeradius.yaml)
-contains everything in this section plus the certificate check from section 5: 12 items,
-8 triggers with dependencies, a dashboard and six macros. It was import-tested against
-Zabbix 7.4.14 (*Data collection → Templates → Import*).
+contains everything in this section plus the certificate check from section 5 and the
+RADIUS outpost from section 3: 18 items, 9 triggers with dependencies, a dashboard and
+seven macros. The LDAP outpost has its own template in the same file (section 3). Both
+were import-tested against Zabbix 7.4.16 (*Data collection → Templates → Import*).
 
 Set at least `{$FREERADIUS.CONTAINER}` and `{$FREERADIUS.CERT.PATH}` on the host after
 linking. The other macros — `{$FREERADIUS.DEADAIR.PERIOD}` (1h),
@@ -197,27 +199,67 @@ this block** — it is a change you would have to make.
 
 ## 3. authentik outpost metrics
 
-*Unverified locally — the outpost only opens this port once it can reach authentik. Finishing this off is [#6](https://github.com/wus-technik/authentik-freeradius/issues/6).*
+Both outposts serve Prometheus metrics on port 9300: the RADIUS outpost because
+`docker-compose.yml` sets `AUTHENTIK_LISTEN__METRICS: 0.0.0.0:9300`, the LDAP outpost by
+default. The names below were read from authentik 2026.8.3 outposts in `test/authentik`,
+before and after TTLS and PEAP logins, and the template was tested against them on
+Zabbix 7.4.16.
 
-The outpost already serves Prometheus metrics: `AUTHENTIK_LISTEN__METRICS: 0.0.0.0:9300`
-is set in `docker-compose.yml`. The port is not published, so bind it to loopback:
+### How the agent reaches them
 
-```yaml
-  authentik_radius:
-    ports:
-      - "127.0.0.1:9300:9300"
+No port is published, and none has to be. Each outpost has a fixed address on the radius
+network (`AUTHENTIK_RADIUS_IP`, `AUTHENTIK_LDAP_IP`), and the Docker host routes to its
+bridge networks. So the **agent on the Docker host** reads the endpoint with its built-in
+`web.page.get`, without curl and without a UserParameter:
+
+```bash
+zabbix_agent2 -t 'web.page.get[172.31.253.10,/metrics,9300]' | head
 ```
 
-Loopback only — the endpoint is unauthenticated.
+A Zabbix *HTTP agent* item would not work here: it runs on the Zabbix server or proxy,
+which cannot reach that network. Publishing the port would make it reachable, but the
+endpoint is unauthenticated, and 9300 may already be taken on the host.
 
-Then one **HTTP agent** master item on `http://127.0.0.1:9300/metrics`, interval 1m, with
-dependent items using **Prometheus pattern** preprocessing. Read the endpoint once with
-`curl -s 127.0.0.1:9300/metrics` and pick names from what it actually emits; they change
-between authentik versions. Besides the outpost's own request counters, `go_goroutines` and
-`process_resident_memory_bytes` make useful leak canaries.
+### What the outposts emit
 
-What this does *not* tell you: the outpost only sees requests that already made it through
-the EAP-TTLS tunnel. Layer 2 sits upstream and sees strictly more.
+| Metric | Outpost | Moves when |
+|---|---|---|
+| `authentik_outpost_connection` | both | gauge, 1 while the outpost is connected to authentik |
+| `authentik_outpost_info{version=…}` | both | gauge 1; the label carries the outpost version |
+| `authentik_outpost_radius_request_duration_seconds_count` | RADIUS | +1 per inner PAP request, accepted or not |
+| `authentik_outpost_radius_requests_rejected_total{reason=…}` | RADIUS | +1 per refused request; wrong password and unknown user both count as `flow_error` |
+| `authentik_outpost_ldap_request_duration_seconds_count{type="search"}` | LDAP | +2 per accepted PEAP login, +1 per refused one |
+| `authentik_outpost_ldap_request_duration_seconds_count{type="bind"}` | LDAP | binds of `svc-wlan-ldap`; FreeRADIUS keeps its connections, so this stays low |
+| `authentik_outpost_flow_timing_*_seconds` | both | time per flow stage, per outpost-side flow execution |
+| `process_resident_memory_bytes`, `go_goroutines` | both | leak canaries |
+
+Three things to know when reading them:
+
+- **Counters appear with their first event.** Until the first reject, the rejected
+  series does not exist at all. The template maps a missing series to 0.
+- **The labels carry installation names** (`outpost_name`, `app`). The template sums over
+  them, so it works unchanged with whatever the outposts and applications are called.
+- **A wrong WiFi password is invisible to the LDAP outpost.** MSCHAPv2 runs in FreeRADIUS;
+  the outpost only answers the search that fetches the hash. For refused PEAP logins use
+  the log lines in section 4.
+
+### Template
+
+`contrib/zabbix/template_authentik_freeradius.yaml` holds two templates:
+
+- **authentik-freeradius by Zabbix agent** now also reads the RADIUS outpost:
+  connection, version, memory, requests and rejects per second. Macro
+  `{$AUTHENTIK.RADIUS.IP}`, default `172.31.253.10`.
+- **authentik-freeradius LDAP outpost by Zabbix agent**, for hosts with
+  `docker-compose.peap.yml` only: connection, version, memory, searches and binds per
+  second. Macro `{$AUTHENTIK.LDAP.IP}`, default `172.31.253.11`.
+
+Each has one trigger, *Not connected to authentik or metrics unreachable* (High). It fires
+when the outpost reports no connection, and when the agent got no metrics for 5 minutes.
+Set the macros to the addresses in your stack if you changed `RADIUS_NET_SUBNET`.
+
+What this does *not* tell you: the RADIUS outpost only sees requests that already made it
+through the EAP-TTLS tunnel. Layer 2 sits upstream and sees strictly more.
 
 ## 4. Log triggers
 
@@ -295,7 +337,7 @@ Run each collector by hand; all of these should print data:
 ```bash
 docker exec freeradius sh -c 'printf "Message-Authenticator = 0x00\nFreeRADIUS-Statistics-Type = All\n" | /opt/bin/radclient -x -t 2 -r 1 127.0.0.1:18121 status "$(cat /run/radiusd/healthcheck.secret)"'
 /usr/local/bin/zbx_radius_stats.sh freeradius
-curl -s 127.0.0.1:9300/metrics | head
+zabbix_agent2 -t 'web.page.get[172.31.253.10,/metrics,9300]' | head
 zabbix_agent2 -t 'freeradius.stats[freeradius]'
 ```
 
