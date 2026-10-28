@@ -32,6 +32,18 @@ that holds every employee, not a new, hand-filled WiFi group: the latter locks o
 everybody nobody remembered to add, on the morning of the cutover. For PEAP, use the same
 group as `wlan_group` (section 6). Tighten it afterwards, in its own change.
 
+Before the cutover, and again during the rollout, list who is in and who is not:
+
+```
+AUTHENTIK_URL=https://auth.example.com AUTHENTIK_API_TOKEN=<token>   contrib/authentik/wlan-access-report.py --group <wlan group>
+```
+
+It reads users and groups (the token needs view permission on both) and prints four lists:
+who can join with PEAP, members without a WiFi password yet, deactivated members, and
+active users outside the group. The last list is what changes against a RADIUS without a
+user filter; the second one is who still has to fetch a WiFi password. Service accounts
+are left out; `--json` gives the same for scripts.
+
 ### Usernames with a domain
 
 authentik matches on the username (EAP-TTLS also on the email). Clients that have

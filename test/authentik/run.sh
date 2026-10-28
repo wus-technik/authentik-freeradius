@@ -112,6 +112,31 @@ rejected directory outsider "$outpw" "a user removed from the WLAN group"
 python3 -I drive.py group outsider 1
 python3 -I drive.py clearhash outsider
 rejected directory outsider "$outpw" "a WLAN member without a WiFi password"
+
+echo "== the cutover report sees what the LDAP filter sees =="
+#  issue #9: peapuser can join, outsider is a member without a password, the
+#  service account is left out, and no hash is ever printed.
+AUTHENTIK_URL=http://127.0.0.1:19000 AUTHENTIK_API_TOKEN=it-bootstrap-token-not-a-real-one \
+	python3 -I ../../contrib/authentik/wlan-access-report.py --group wlan --json >.state/report.json \
+	|| fail "the WLAN access report failed"
+python3 -I - .state/report.json <<'EOF' || fail "the WLAN access report is wrong: $(cat .state/report.json)"
+import json, re, sys
+text = open(sys.argv[1]).read()
+r = json.loads(text)
+assert r["can_join"] == ["peapuser"], r
+assert r["no_wifi_password"] == ["outsider"], r
+assert r["deactivated_members"] == [], r
+assert "akadmin" in r["outside_group"], r
+assert not any(n.startswith(("svc-wlan-ldap", "ak-outpost")) for n in r["outside_group"]), r
+assert not re.search(r"[0-9A-F]{32}", text), "a hash in the report"
+EOF
+python3 -I drive.py active outsider 0
+AUTHENTIK_URL=http://127.0.0.1:19000 AUTHENTIK_API_TOKEN=it-bootstrap-token-not-a-real-one \
+	python3 -I ../../contrib/authentik/wlan-access-report.py --group wlan --json >.state/report.json \
+	|| fail "the WLAN access report failed"
+python3 -I -c 'import json, sys; r = json.load(open(sys.argv[1])); assert r["deactivated_members"] == ["outsider"], r' \
+	.state/report.json || fail "the report missed a deactivated member: $(cat .state/report.json)"
+python3 -I drive.py active outsider 1
 python3 -I drive.py group outsider 0
 
 echo "== a new password replaces the old one =="

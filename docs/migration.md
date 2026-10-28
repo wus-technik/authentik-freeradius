@@ -84,9 +84,11 @@ WiFi pass.
 - [ ] Certificate decision made (carry over, or new + client rollout).
 - [ ] Every active client network covered, each with its own secret.
 - [ ] Realm forms the old server accepted still work.
-- [ ] Group/flow binding in authentik agreed against the old server's (absent) user filter.
+- [ ] Group/flow binding in authentik agreed against the old server's (absent) user filter;
+      `contrib/authentik/wlan-access-report.py` shows nobody left outside who should be in.
 - [ ] One real client of each platform authenticated against the new stack **before**
       the old server is touched.
-- [ ] With PEAP: users told, WiFi passwords fetched, one device per platform (Windows,
-      iOS, macOS, Android) joined without a profile.
+- [ ] With PEAP: users told, WiFi passwords fetched (the report's "members without a WiFi
+      password" is empty or agreed), one device per platform (Windows, iOS, macOS,
+      Android) joined without a profile.
 - [ ] Old server left running and reachable until the new one has carried production load.
