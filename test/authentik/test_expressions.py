@@ -6,6 +6,7 @@ small fakes of the objects authentik passes in. Standard library only.
 """
 import contextlib
 import pathlib
+import re
 import sys
 import types
 import unittest
@@ -25,6 +26,7 @@ def compile_expression(code, params):
 GENERATE_SRC, SAVE_SRC = build_blueprint.expressions()
 generate = compile_expression(GENERATE_SRC, ["user", "http_request"])
 save = compile_expression(SAVE_SRC, ["request", "ak_message", "ak_logger"])
+generate_de = compile_expression(build_blueprint.expressions("de")[0], ["user", "http_request"])
 md4_ns = {}
 exec((ROOT / "src" / "md4.py").read_text(encoding="utf-8"), md4_ns)
 md4 = md4_ns["md4"]
@@ -120,6 +122,13 @@ class WordlistTest(unittest.TestCase):
         self.assertNotIn("yo-yo", words)
         self.assertTrue(all(w.isalpha() and w.islower() and 3 <= len(w) <= 5 for w in words))
 
+    def test_german_list(self):
+        words = build_blueprint.words("de")
+        # Six words from at least 6^4 give the same entropy as the EFF list.
+        self.assertGreaterEqual(len(words), 1296)
+        self.assertEqual(len(set(words)), len(words))
+        self.assertTrue(all(re.fullmatch(r"[a-z]{3,6}", w) for w in words))
+
 
 class GenerateTest(unittest.TestCase):
     def setUp(self):
@@ -132,6 +141,12 @@ class GenerateTest(unittest.TestCase):
     def test_six_words_from_the_list(self):
         words = set(build_blueprint.words())
         parts = generate(self.user, self.http).split("-")
+        self.assertEqual(len(parts), 6)
+        self.assertTrue(set(parts) <= words)
+
+    def test_six_words_from_the_german_list(self):
+        words = set(build_blueprint.words("de"))
+        parts = generate_de(self.user, self.http).split("-")
         self.assertEqual(len(parts), 6)
         self.assertTrue(set(parts) <= words)
 
@@ -257,8 +272,10 @@ class SaveTest(unittest.TestCase):
 
 
 class BlueprintTest(unittest.TestCase):
-    def test_committed_blueprint_is_current(self):
-        self.assertEqual(build_blueprint.OUT.read_text(encoding="utf-8"), build_blueprint.render())
+    def test_committed_blueprints_are_current(self):
+        for lang, out in build_blueprint.OUTPUTS.items():
+            with self.subTest(lang=lang):
+                self.assertEqual(out.read_text(encoding="utf-8"), build_blueprint.render(lang))
 
 
 if __name__ == "__main__":

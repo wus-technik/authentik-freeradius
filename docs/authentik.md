@@ -122,7 +122,10 @@ generated **WiFi password** in the authentik portal. Their SSO password is not i
 ### Import the blueprint
 
 **Customization → Blueprints → Import**, upload
-[`authentik/blueprints/wlan-passwort.yaml`](../authentik/blueprints/wlan-passwort.yaml).
+[`authentik/blueprints/wlan-passwort.yaml`](../authentik/blueprints/wlan-passwort.yaml)
+for English passphrases or
+[`authentik/blueprints/wlan-passwort.de.yaml`](../authentik/blueprints/wlan-passwort.de.yaml)
+for German ones (see below).
 
 | Context key | Default | Meaning |
 |---|---|---|
@@ -137,6 +140,22 @@ generated **WiFi password** in the authentik portal. Their SSO password is not i
 It creates the flow `wlan-passwort`, the portal tile **WLAN-Zugang**, and the LDAP
 provider `wlan-ldap` with its own bind flow. Change the defaults by editing the context
 block before the import. Without `authentik_url` the tile points to `authentik.example.com`.
+
+### English or German words
+
+The passphrase is six words from a word list. Two blueprints ship, identical except for
+the list; import **one** of them:
+
+| Blueprint | Word list | Example |
+|---|---|---|
+| [`wlan-passwort.yaml`](../authentik/blueprints/wlan-passwort.yaml) | EFF short word list, 1295 English words | `gloss-venue-swing-cushy-path-wake` |
+| [`wlan-passwort.de.yaml`](../authentik/blueprints/wlan-passwort.de.yaml) | [`wortliste_de.txt`](../authentik/src/wortliste_de.txt), 1296 German words from OpenThesaurus | `redner-sakko-neblig-gischt-damals-seicht` |
+
+Both lists hold only `a`–`z`, three to six letters, so the passphrase types the same on
+every keyboard; the German list has no umlauts or ß. Six words from either list give about
+62 bits. The two blueprints create the same objects, so switching later means importing
+the other one with the same context: only the generator changes, WiFi passwords already
+saved stay valid.
 
 ### Service account, permission, outpost
 
@@ -220,3 +239,8 @@ PEAP users stay in the SSID's VLAN.
 - Only the `wlan-passwort` flow may write `wifi-password-nthash`. Do not add a prompt field
   named `attributes.wifi-password-*` to any user-facing flow (enrollment, profile edit):
   users could then set the hash to a value of their choosing and the guarantee is gone.
+  The one documented exception is an initial WiFi password set by an administrative
+  process through the API, for example during onboarding. Use a dedicated service account
+  that may only view and change users (`view_user`, `change_user`), generate the passphrase
+  from the same word list, and **never overwrite an existing `wifi-password-nthash`**:
+  the user may already have fetched a password in the portal.

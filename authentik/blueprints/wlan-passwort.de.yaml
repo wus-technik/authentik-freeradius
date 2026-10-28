@@ -1,0 +1,310 @@
+# authentik blueprint for the WiFi password (authentik-freeradius, issue #14).
+# GENERATED from authentik/src/ by authentik/build_blueprint.py -- edit the
+# sources, then run: python3 authentik/build_blueprint.py
+#
+# Not covered here, see docs/authentik.md section 6: the service account
+# svc-wlan-ldap, its search permission, and the LDAP outpost.
+version: 1
+metadata:
+  name: authentik-freeradius WLAN-Passwort
+  labels:
+    blueprints.goauthentik.io/instantiate: "false"
+context:
+  wlan_group: wlan
+  ldap_search_group: wlan-ldap-search
+  ssid: WLAN
+  radius_server_name: radius.example.com
+  password_manager: Bitwarden
+  # authentik accepts only an absolute launch URL for the portal tile.
+  authentik_url: https://authentik.example.com
+  ldap_base_dn: dc=ldap,dc=goauthentik,dc=io
+entries:
+  # Groups are only created, never changed: an existing WLAN group keeps its
+  # members and settings.
+  - model: authentik_core.group
+    state: created
+    identifiers:
+      name: !Context wlan_group
+  - model: authentik_core.group
+    state: created
+    identifiers:
+      name: !Context ldap_search_group
+
+  # --- WiFi password flow (spec 5.1) --------------------------------------
+  - model: authentik_policies_expression.expressionpolicy
+    id: policy-save
+    identifiers:
+      name: wlan-passwort-speichern
+    attrs:
+      expression: |
+        # MD4 (RFC 1320). authentik's Python links OpenSSL 3, which no longer offers
+        # MD4, and the NT hash MSCHAPv2 needs is MD4 over the UTF-16LE password.
+        import struct
+
+
+        def md4(data):
+            def rol(v, s):
+                v &= 0xFFFFFFFF
+                return ((v << s) | (v >> (32 - s))) & 0xFFFFFFFF
+
+            F = lambda x, y, z: (x & y) | (~x & z)  # noqa: E731
+            G = lambda x, y, z: (x & y) | (x & z) | (y & z)  # noqa: E731
+            H = lambda x, y, z: x ^ y ^ z  # noqa: E731
+            msg = bytearray(data)
+            bitlen = len(data) * 8
+            msg.append(0x80)
+            while len(msg) % 64 != 56:
+                msg.append(0)
+            msg += struct.pack("<Q", bitlen)
+            a, b, c, d = 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476
+            for off in range(0, len(msg), 64):
+                X = struct.unpack("<16I", bytes(msg[off:off + 64]))
+                A, B, C, D = a, b, c, d
+                for i in (0, 4, 8, 12):
+                    A = rol(A + F(B, C, D) + X[i], 3)
+                    D = rol(D + F(A, B, C) + X[i + 1], 7)
+                    C = rol(C + F(D, A, B) + X[i + 2], 11)
+                    B = rol(B + F(C, D, A) + X[i + 3], 19)
+                for i in (0, 1, 2, 3):
+                    A = rol(A + G(B, C, D) + X[i] + 0x5A827999, 3)
+                    D = rol(D + G(A, B, C) + X[i + 4] + 0x5A827999, 5)
+                    C = rol(C + G(D, A, B) + X[i + 8] + 0x5A827999, 9)
+                    B = rol(B + G(C, D, A) + X[i + 12] + 0x5A827999, 13)
+                for i in (0, 2, 1, 3):
+                    A = rol(A + H(B, C, D) + X[i] + 0x6ED9EBA1, 3)
+                    D = rol(D + H(A, B, C) + X[i + 8] + 0x6ED9EBA1, 9)
+                    C = rol(C + H(D, A, B) + X[i + 4] + 0x6ED9EBA1, 11)
+                    B = rol(B + H(C, D, A) + X[i + 12] + 0x6ED9EBA1, 15)
+                a, b, c, d = [(p + q) & 0xFFFFFFFF for p, q in ((a, A), (b, B), (c, C), (d, D))]
+            return struct.pack("<4I", a, b, c, d)
+
+        # Validation policy of the wlan-passwort-anzeige prompt stage (spec 5.1).
+        # prompt_data holds the server-side value of the read-only field, never what
+        # the browser posted; it must still match the pending passphrase.
+        from datetime import datetime, timezone
+
+        from authentik.core.models import User
+        from django.db import transaction
+
+        data = request.context.get("prompt_data") or {}
+        if data.get("wifi_ack") is not True:
+            ak_message("Bitte bestätige, dass du das Passwort gespeichert hast.")
+            return False
+        password = data.get("wifi_password")
+        pending = request.http_request.session.get("wifi_password_pending") or {}
+        if not password or password != pending.get("pw") or not request.user.pk:
+            ak_message("Das WLAN-Passwort ist abgelaufen. Bitte lade die Seite neu.")
+            return False
+        try:
+            with transaction.atomic():
+                fresh = User.objects.select_for_update().get(pk=request.user.pk)
+                # Another session saved since this passphrase was made: keep that one.
+                if (fresh.attributes or {}).get("wifi-password-set-at", "") != pending.get("base"):
+                    ak_message("Das WLAN-Passwort wurde inzwischen neu gesetzt. Bitte lade die Seite neu.")
+                    return False
+                fresh.attributes["wifi-password-nthash"] = md4(password.encode("utf-16-le")).hex().upper()
+                fresh.attributes["wifi-password-set-at"] = datetime.now(timezone.utc).isoformat()
+                fresh.save(update_fields=["attributes"])
+        except Exception as exc:
+            ak_logger.warning("wifi password not saved", exc=repr(exc))
+            ak_message("Das WLAN-Passwort konnte nicht gespeichert werden. Bitte versuche es erneut.")
+            return False
+        # The password is stored from here on; nothing below may turn that into a
+        # refusal. A pending value left behind is harmless: the generate expression
+        # drops it once wifi-password-set-at has moved on.
+        #
+        # prompt_data is the dict the prompt stage then copies into the flow plan, and
+        # the executor keeps a copy of every plan in the session's flow history after
+        # the flow ends. Dropping the passphrase here keeps it out of both.
+        try:
+            request.http_request.session.pop("wifi_password_pending", None)
+            data.pop("wifi_password", None)
+            ak_logger.info("wifi password set", user=fresh.username)
+        except Exception as exc:
+            ak_logger.warning("wifi password set, session not cleared", exc=repr(exc))
+        return True
+  - model: authentik_stages_prompt.prompt
+    id: prompt-password
+    identifiers:
+      name: wlan-passwort-feld
+    attrs:
+      field_key: wifi_password
+      label: Dein WLAN-Passwort
+      type: text_read_only
+      required: false
+      order: 0
+      initial_value_expression: true
+      initial_value: |
+        WORDS = ('abbau', 'abbild', 'abends', 'aber', 'abfall', 'abflug', 'abfuhr', 'abgas', 'abguss', 'abhang', 'abitur', 'ablage', 'ablauf', 'abo', 'abruf', 'abrupt', 'absatz', 'absurd', 'abteil', 'abwehr', 'achse', 'acker', 'adel', 'adelig', 'adler', 'adverb', 'agil', 'agrar', 'ahorn', 'airbag', 'akkord', 'akte', 'akut', 'akzent', 'alarm', 'alibi', 'allee', 'alltag', 'alm', 'alpaka', 'alpha', 'alpin', 'also', 'altbau', 'amsel', 'analog', 'anbei', 'anger', 'angst', 'anhand', 'ankauf', 'ankern', 'anmut', 'anode', 'anorak', 'anrede', 'anreiz', 'ansage', 'antike', 'anzahl', 'anzug', 'apfel', 'april', 'archiv', 'arglos', 'aronia', 'artist', 'arznei', 'aspik', 'ast', 'athlet', 'atlas', 'atmen', 'atmung', 'atoll', 'atomar', 'aufbau', 'auge', 'august', 'aura', 'ausruf', 'ausweg', 'auszug', 'avatar', 'azur', 'bach', 'backe', 'backup', 'bad', 'bagel', 'baiser', 'balkon', 'ball', 'banal', 'bandit', 'bank', 'banner', 'barbe', 'barett', 'barsch', 'bart', 'base', 'bauart', 'bebaut', 'beben', 'becher', 'becken', 'beet', 'befehl', 'begabt', 'beides', 'beirat', 'beizen', 'belag', 'belebt', 'belege', 'benzin', 'bequem', 'bereit', 'bergab', 'beruf', 'besagt', 'besitz', 'betrag', 'beule', 'beutel', 'beweis', 'biber', 'bilanz', 'bilden', 'bims', 'binde', 'biogas', 'bionik', 'biotop', 'bisher', 'bistro', 'biwak', 'bizarr', 'bizeps', 'blei', 'blick', 'blitz', 'blond', 'bluff', 'blumig', 'boiler', 'bommel', 'bonobo', 'bord', 'bote', 'boxen', 'brauch', 'breiig', 'breite', 'brezel', 'brief', 'brille', 'bronze', 'brunch', 'brust', 'bube', 'buchen', 'buchse', 'bucht', 'buffet', 'bulgur', 'bunt', 'burg', 'busch', 'butter', 'cabrio', 'cache', 'campus', 'casino', 'cello', 'cent', 'chance', 'charme', 'chic', 'chili', 'chor', 'clou', 'cola', 'comic', 'cousin', 'creme', 'cremig', 'curry', 'cyan', 'dachs', 'daheim', 'damals', 'damast', 'damit', 'damm', 'danke', 'dann', 'darauf', 'darin', 'darum', 'dasein', 'datei', 'dauer', 'daune', 'dazu', 'deck', 'deckel', 'deftig', 'dehnen', 'deich', 'delfin', 'delta', 'denker', 'deo', 'derart', 'derb', 'desto', 'detail', 'dezent', 'dichte', 'dicke', 'dienst', 'dies', 'dieses', 'diffus', 'dill', 'dimmer', 'dinge', 'diode', 'diplom', 'dippen', 'disko', 'diskus', 'distel', 'dito', 'diva', 'doch', 'dodo', 'dollar', 'domino', 'donner', 'donut', 'doppel', 'dorade', 'dorn', 'dornig', 'dosis', 'drache', 'dragee', 'drall', 'droben', 'drohne', 'duften', 'dukat', 'dummy', 'dumpf', 'dunst', 'dutt', 'dynamo', 'ebbe', 'ebenda', 'ebene', 'ebnen', 'editor', 'efeu', 'effekt', 'ehe', 'ehrbar', 'ehrung', 'eiche', 'eifrig', 'eigelb', 'eile', 'eilzug', 'einbau', 'einzig', 'eis', 'elch', 'elf', 'elite', 'elster', 'email', 'emblem', 'emsig', 'enden', 'endung', 'enge', 'enkel', 'enzym', 'episch', 'epoche', 'epos', 'erbse', 'erdig', 'erhalt', 'erker', 'erlass', 'erneut', 'ernte', 'erpel', 'ersatz', 'ertrag', 'erwerb', 'essay', 'essbar', 'esse', 'etappe', 'etat', 'ethik', 'exakt', 'examen', 'exotik', 'expo', 'export', 'extern', 'extrem', 'fabel', 'fabrik', 'faden', 'fakt', 'faktum', 'falls', 'falte', 'fang', 'farbig', 'farn', 'faser', 'fasten', 'fax', 'fazit', 'feier', 'fein', 'felge', 'fels', 'ferkel', 'ferse', 'fest', 'feta', 'fetten', 'fettig', 'feudal', 'feurig', 'fiasko', 'fiepen', 'fiktiv', 'filmen', 'filz', 'final', 'findig', 'firnis', 'fisch', 'fjord', 'flagge', 'flakon', 'flanke', 'flaum', 'fliese', 'flink', 'flirt', 'flora', 'flott', 'flug', 'fluse', 'fohlen', 'fokus', 'fonds', 'form', 'formal', 'forst', 'fossil', 'foul', 'fracht', 'frau', 'freude', 'freund', 'friede', 'frist', 'frisur', 'front', 'fugen', 'fund', 'furt', 'fusion', 'fussel', 'gala', 'galant', 'ganzes', 'garage', 'garten', 'gaumen', 'gebiet', 'gebot', 'geduld', 'geehrt', 'geeint', 'gefeit', 'gehalt', 'gehege', 'gehirn', 'gehweg', 'geige', 'geiser', 'gelage', 'gelee', 'gelenk', 'gellen', 'genick', 'genie', 'genius', 'genug', 'genuss', 'gerber', 'gern', 'geruch', 'gesamt', 'gesang', 'gesetz', 'geste', 'gestik', 'getue', 'gewand', 'gewebe', 'gewiss', 'gilde', 'gilet', 'ginkgo', 'gips', 'girren', 'gischt', 'gitter', 'glasig', 'glasur', 'gleis', 'glied', 'global', 'glocke', 'gluten', 'gnom', 'gokart', 'gold', 'golfen', 'gongen', 'grad', 'grafit', 'granat', 'gratis', 'grazil', 'greif', 'grell', 'griff', 'grotte', 'grube', 'gurgel', 'gusto', 'haar', 'haarig', 'hahn', 'hai', 'halde', 'hallen', 'hals', 'hangar', 'hantel', 'harke', 'harren', 'harz', 'hastig', 'haube', 'haupt', 'haxe', 'hecht', 'hecke', 'hefe', 'hefter', 'heide', 'heilen', 'heim', 'hektik', 'heldin', 'helfer', 'helium', 'hell', 'hemd', 'hemmen', 'hengst', 'henne', 'herab', 'herauf', 'herum', 'hervor', 'herzig', 'hier', 'hierzu', 'hilfe', 'hinab', 'hinein', 'hinten', 'hiphop', 'hissen', 'hitze', 'hobbit', 'hocker', 'hoheit', 'holz', 'honig', 'horten', 'hose', 'hotel', 'humor', 'hunger', 'hupe', 'hut', 'ideal', 'idol', 'idylle', 'ikone', 'image', 'imbiss', 'imker', 'immun', 'impala', 'import', 'index', 'indiz', 'ingwer', 'innig', 'innung', 'ins', 'insekt', 'insel', 'intakt', 'intern', 'iris', 'ironie', 'irrtum', 'jacht', 'jammer', 'januar', 'jaulen', 'jawoll', 'jazz', 'jeans', 'jeden', 'jedoch', 'jemals', 'jemand', 'jene', 'jetlag', 'jetski', 'jockey', 'joker', 'jolle', 'jubel', 'jucken', 'juli', 'jumper', 'jurist', 'jurte', 'jury', 'kachel', 'kader', 'kahl', 'kajak', 'kaktus', 'kalb', 'kamera', 'kamin', 'kandis', 'kanzel', 'kappe', 'kapsel', 'kapuze', 'karton', 'kasack', 'katze', 'kauen', 'kauf', 'kausal', 'kauzig', 'kebab', 'kegeln', 'kehle', 'keiner', 'keks', 'kerbe', 'khaki', 'kiel', 'kiesel', 'kilt', 'kind', 'kiosk', 'kitsch', 'kitz', 'klamm', 'klecks', 'kleid', 'klemme', 'klinge', 'klippe', 'klobig', 'klonen', 'kneipe', 'kneten', 'knick', 'knien', 'knospe', 'koala', 'kode', 'koffer', 'kokett', 'kolleg', 'konsum', 'konto', 'kontra', 'kontur', 'kopie', 'korken', 'kost', 'krabbe', 'kragen', 'krake', 'krater', 'kredit', 'kreide', 'krempe', 'krepp', 'krimi', 'krise', 'kritik', 'krokus', 'krug', 'krume', 'kruste', 'kubus', 'kulant', 'kultur', 'kummer', 'kupon', 'kurbad', 'kurier', 'kurort', 'kurs', 'kursiv', 'kurve', 'kurzum', 'kusine', 'kuskus', 'kuvert', 'labil', 'labor', 'ladung', 'lage', 'laken', 'land', 'laptop', 'larve', 'lasche', 'lasso', 'latein', 'latenz', 'launen', 'launig', 'laut', 'leasen', 'leber', 'ledig', 'leere', 'legal', 'lehrer', 'leib', 'leider', 'leine', 'leiten', 'lesart', 'lese', 'lesung', 'licht', 'liebe', 'lift', 'lila', 'lineal', 'linker', 'liste', 'listig', 'lob', 'lobend', 'lochen', 'lockig', 'lodern', 'logik', 'logo', 'lohn', 'loipe', 'lotos', 'lotse', 'luchs', 'luftig', 'luke', 'lunge', 'luxus', 'lyrik', 'magen', 'magie', 'magma', 'magnat', 'mahlen', 'mais', 'makro', 'maler', 'man', 'mandat', 'mandel', 'manko', 'marge', 'marina', 'marker', 'markig', 'markt', 'marode', 'maske', 'massiv', 'matsch', 'matt', 'medium', 'meduse', 'meer', 'mehl', 'mehlig', 'meist', 'mengen', 'menhir', 'mental', 'mentor', 'meteor', 'metro', 'miau', 'miete', 'milbe', 'milieu', 'mimik', 'minder', 'mine', 'minute', 'mithin', 'mixen', 'mixtur', 'model', 'mofa', 'mole', 'mollig', 'monat', 'mond', 'monsun', 'montag', 'moor', 'moped', 'moppen', 'moral', 'morgen', 'morsch', 'mosaik', 'motto', 'muffig', 'murren', 'musik', 'muskat', 'mutig', 'nabe', 'nachts', 'nager', 'nahbar', 'naht', 'naja', 'napf', 'nation', 'nebel', 'neblig', 'neid', 'neon', 'nessel', 'netzen', 'neuer', 'neuron', 'nie', 'nieder', 'niere', 'nieten', 'nimbus', 'nippes', 'nomade', 'nomen', 'not', 'nougat', 'novum', 'nuckel', 'nudeln', 'nussig', 'nuten', 'nutzer', 'oben', 'obhut', 'obskur', 'obst', 'obwohl', 'oder', 'oft', 'ohr', 'okra', 'oktett', 'online', 'optik', 'orakel', 'orange', 'orden', 'ordner', 'orgel', 'orkan', 'osten', 'ozean', 'ozon', 'paaren', 'paddel', 'paket', 'palast', 'palme', 'panel', 'panik', 'panter', 'parade', 'parfum', 'park', 'parole', 'pass', 'pasta', 'pastel', 'pate', 'pathos', 'pedal', 'pedant', 'pegel', 'pektin', 'pensum', 'pfand', 'pfanne', 'pferch', 'pflege', 'pfoten', 'pilger', 'piment', 'pinie', 'pink', 'pirat', 'pirol', 'pita', 'pixel', 'pizza', 'plakat', 'plan', 'platin', 'plump', 'podest', 'poesie', 'poet', 'pokal', 'pokern', 'polar', 'pollen', 'poncho', 'pop', 'porto', 'pouf', 'praxis', 'preis', 'presse', 'prinz', 'privat', 'pro', 'profit', 'prunk', 'puck', 'puder', 'puffer', 'pult', 'puma', 'puppe', 'purpur', 'putzen', 'puzzle', 'pyjama', 'pylon', 'quader', 'qualle', 'quarz', 'quaste', 'quer', 'quinoa', 'quirl', 'quiz', 'rabatt', 'radar', 'radeln', 'radweg', 'ragout', 'rahm', 'rammen', 'rampe', 'ranzen', 'rap', 'rasch', 'raspel', 'raster', 'raten', 'ratlos', 'ratsam', 'rattan', 'raute', 'rebell', 'rebus', 'rede', 'redner', 'reeder', 'reform', 'region', 'regler', 'regung', 'reife', 'reihen', 'reihum', 'reiter', 'reiz', 'relief', 'relikt', 'rennen', 'report', 'rezept', 'riegel', 'riesig', 'ring', 'rinne', 'risiko', 'ritt', 'ritual', 'ritzen', 'rivale', 'robbe', 'robust', 'roh', 'rokoko', 'rollo', 'roman', 'rosa', 'rosine', 'routen', 'royal', 'rubrik', 'rucola', 'rudel', 'rudern', 'ruhe', 'ruine', 'runde', 'rundum', 'rupfen', 'saal', 'safari', 'sago', 'sakko', 'saldo', 'salopp', 'salz', 'salzig', 'samen', 'samt', 'samtig', 'sari', 'satire', 'sauce', 'sauna', 'schach', 'schall', 'schau', 'scheck', 'scheit', 'schelm', 'schema', 'scherz', 'schild', 'schlot', 'schopf', 'schrei', 'schub', 'schutt', 'schwur', 'seekuh', 'seele', 'seeweg', 'seher', 'sehnig', 'seicht', 'seidig', 'seite', 'sensor', 'sepia', 'setzei', 'shirt', 'sieb', 'sieden', 'sieger', 'siesta', 'silber', 'sinn', 'sirup', 'skala', 'ski', 'skizze', 'slalom', 'slogan', 'smog', 'sobald', 'sockel', 'sodass', 'soeben', 'sofern', 'sohle', 'soiree', 'solo', 'somit', 'sommer', 'sonate', 'sonde', 'sonnig', 'sooft', 'sopran', 'sorte', 'sound', 'sowie', 'sowohl', 'sozial', 'spalt', 'spam', 'spanne', 'sparte', 'spatel', 'speck', 'speer', 'speise', 'spende', 'sperre', 'spind', 'spion', 'spot', 'sprint', 'sprung', 'spuk', 'spule', 'spurt', 'staat', 'stab', 'stabil', 'stahl', 'staket', 'stange', 'starr', 'stein', 'stelle', 'steppe', 'steril', 'stetig', 'stets', 'steuer', 'stiel', 'stopp', 'storch', 'storno', 'strand', 'strass', 'strebe', 'streik', 'strich', 'strikt', 'strom', 'stube', 'studie', 'subtil', 'suche', 'summe', 'symbol', 'system', 'tablet', 'tagung', 'taifun', 'taiga', 'taktik', 'tal', 'talent', 'tanken', 'tanne', 'tapete', 'tarif', 'tarnen', 'tartan', 'taste', 'tatort', 'tattoo', 'taumel', 'taxi', 'teak', 'techno', 'teddy', 'tee', 'teils', 'teint', 'tenor', 'termin', 'text', 'textur', 'theke', 'therme', 'tiara', 'ticket', 'tief', 'tiger', 'tilgen', 'tinte', 'tipp', 'titel', 'toffee', 'tofu', 'tomate', 'ton', 'topfit', 'torso', 'tosen', 'totem', 'toupet', 'tour', 'traben', 'trakt', 'tram', 'trance', 'trapez', 'trasse', 'traube', 'trend', 'trense', 'treppe', 'tresen', 'tresor', 'treue', 'tribut', 'trost', 'trotz', 'trumpf', 'tuch', 'tugend', 'tulpe', 'tundra', 'tunika', 'tunke', 'tunnel', 'turnus', 'typus', 'ufer', 'ulkig', 'ulme', 'ultra', 'umbau', 'umkehr', 'umriss', 'umsatz', 'umzug', 'uneben', 'unfair', 'unfug', 'ungern', 'unikum', 'unsinn', 'unten', 'urahn', 'uralt', 'urban', 'urform', 'urig', 'urlaub', 'urteil', 'urzeit', 'vakant', 'vakuum', 'vampir', 'verbot', 'verein', 'verlag', 'vers', 'verzug', 'vieh', 'viele', 'visier', 'vision', 'visite', 'visum', 'vize', 'vlies', 'vorab', 'voraus', 'vorhin', 'vorig', 'vorort', 'vortex', 'vulkan', 'waage', 'wagon', 'wahr', 'wapiti', 'wappen', 'warte', 'wasabi', 'wecker', 'wedeln', 'wegen', 'wegzug', 'weh', 'wehmut', 'weiher', 'weise', 'welk', 'wellig', 'welpe', 'wendel', 'wenige', 'werken', 'wette', 'widder', 'wiese', 'wiki', 'wille', 'wimpel', 'winkel', 'winter', 'wipfel', 'wippe', 'wirt', 'wisent', 'wobei', 'woche', 'woge', 'woher', 'wohnen', 'wok', 'wolken', 'wolkig', 'wombat', 'wonach', 'wonne', 'woran', 'worauf', 'wovon', 'wozu', 'wrack', 'wulst', 'wunder', 'wurf', 'yak', 'yeti', 'yoga', 'zander', 'zange', 'zaun', 'zeitig', 'zelt', 'zement', 'zepter', 'zerren', 'zettel', 'zeuge', 'ziffer', 'zikade', 'zimt', 'zinsen', 'zirpen', 'zoll', 'zoo', 'zoomen', 'zopf', 'zottig', 'zudem', 'zufall', 'zufuhr', 'zugig', 'zulage', 'zumal', 'zuname', 'zusatz', 'zweck', 'zwinge', 'zwirn')
+        # Initial value of the read-only wifi_password field (spec 5.1). authentik
+        # evaluates it on every render AND again on submit, so the passphrase lives in
+        # the session: the same one until it is saved, then a new one. "base" is the
+        # user's wifi-password-set-at when it was made; once the save policy writes a
+        # new timestamp, the next visit gets a new passphrase even if clearing the
+        # session did not stick.
+        #
+        # Only a render (GET to the flow executor) makes a new passphrase. A submit
+        # (POST) without a matching pending value comes from a page that is out of
+        # date -- typically a second tab after the first one saved. Generating there
+        # would store a passphrase nobody has seen; returning "" makes the save policy
+        # refuse with "abgelaufen" instead, and the session stays untouched.
+        import secrets
+
+        if http_request is None:
+            return ""
+        session = http_request.session
+        base = (user.attributes or {}).get("wifi-password-set-at", "")
+        pending = session.get("wifi_password_pending")
+        if pending and pending.get("base") == base:
+            return pending["pw"]
+        if http_request.method == "POST":
+            return ""
+        pending = {"pw": "-".join(secrets.choice(WORDS) for _ in range(6)), "base": base}
+        session["wifi_password_pending"] = pending
+        return pending["pw"]
+  - model: authentik_stages_prompt.prompt
+    id: prompt-info
+    identifiers:
+      name: wlan-passwort-info
+    attrs:
+      field_key: wifi_info
+      label: So verbindest du dich
+      type: static
+      required: false
+      order: 1
+      initial_value: !Format
+        - "WLAN: %s. Benutzername: dein authentik-Benutzername. Beim ersten Verbinden fragt das Gerät nach einem Zertifikat: bestätige es nur, wenn es auf %s lautet. Das Passwort wird nur jetzt angezeigt: speichere es gleich in %s."
+        - !Context ssid
+        - !Context radius_server_name
+        - !Context password_manager
+  - model: authentik_stages_prompt.prompt
+    id: prompt-ack
+    identifiers:
+      name: wlan-passwort-bestaetigung
+    attrs:
+      field_key: wifi_ack
+      label: Ich habe das Passwort gespeichert. Mein bisheriges WLAN-Passwort wird damit ungültig.
+      type: checkbox
+      required: true
+      order: 2
+  - model: authentik_stages_prompt.promptstage
+    id: stage-prompt
+    identifiers:
+      name: wlan-passwort-anzeige
+    attrs:
+      fields:
+        - !KeyOf prompt-password
+        - !KeyOf prompt-info
+        - !KeyOf prompt-ack
+      validation_policies:
+        - !KeyOf policy-save
+  - model: authentik_flows.flow
+    id: flow-wlan
+    identifiers:
+      slug: wlan-passwort
+    attrs:
+      name: WLAN-Passwort
+      title: WLAN-Passwort
+      designation: stage_configuration
+      authentication: require_authenticated
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf flow-wlan
+      order: 0
+    attrs:
+      group: !Find [authentik_core.group, [name, !Context wlan_group]]
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-wlan
+      stage: !KeyOf stage-prompt
+      order: 10
+
+  # --- Portal tile (spec 5.4) ----------------------------------------------
+  - model: authentik_core.application
+    id: app-wlan
+    identifiers:
+      slug: wlan-zugang
+    attrs:
+      name: WLAN-Zugang
+      meta_launch_url: !Format
+        - "%s/if/flow/wlan-passwort/"
+        - !Context authentik_url
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf app-wlan
+      order: 0
+    attrs:
+      group: !Find [authentik_core.group, [name, !Context wlan_group]]
+
+  # --- LDAP for FreeRADIUS (spec 5.5) --------------------------------------
+  - model: authentik_stages_identification.identificationstage
+    id: ldap-ident
+    identifiers:
+      name: wlan-ldap-identification
+    attrs:
+      user_fields: [username]
+  - model: authentik_stages_password.passwordstage
+    id: ldap-password
+    identifiers:
+      name: wlan-ldap-password
+    attrs:
+      # The service account binds with its app-password token.
+      backends:
+        - authentik.core.auth.InbuiltBackend
+        - authentik.core.auth.TokenBackend
+  - model: authentik_stages_user_login.userloginstage
+    id: ldap-login
+    identifiers:
+      name: wlan-ldap-login
+  - model: authentik_flows.flow
+    id: flow-ldap-bind
+    identifiers:
+      slug: wlan-ldap-bind
+    attrs:
+      name: WLAN LDAP bind
+      title: WLAN LDAP bind
+      designation: authentication
+      # Only the outpost may run this flow; in a browser it would be a login
+      # without the MFA of the regular authentication flow.
+      authentication: require_outpost
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-ldap-bind
+      stage: !KeyOf ldap-ident
+      order: 10
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-ldap-bind
+      stage: !KeyOf ldap-password
+      order: 20
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf flow-ldap-bind
+      stage: !KeyOf ldap-login
+      order: 30
+  - model: authentik_providers_ldap.ldapprovider
+    id: provider-ldap
+    identifiers:
+      name: wlan-ldap
+    attrs:
+      authorization_flow: !KeyOf flow-ldap-bind
+      invalidation_flow: !Find [authentik_flows.flow, [slug, default-invalidation-flow]]
+      base_dn: !Context ldap_base_dn
+      # direct: a deactivation or group change applies to the next login.
+      search_mode: direct
+      bind_mode: direct
+  - model: authentik_core.application
+    id: app-ldap
+    identifiers:
+      slug: wlan-ldap
+    attrs:
+      name: wlan-ldap
+      provider: !KeyOf provider-ldap
+  # Only members of this group may bind. Nobody is in it until the service
+  # account is added; this provider hands out NT hashes.
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf app-ldap
+      order: 0
+    attrs:
+      group: !Find [authentik_core.group, [name, !Context ldap_search_group]]
