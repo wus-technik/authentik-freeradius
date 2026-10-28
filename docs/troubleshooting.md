@@ -128,6 +128,16 @@ iOS and macOS do that when they join an SSID by hand. With `PEAP_ENABLE=true` su
 are offered PEAP first and do not get here. Without PEAP, they need a `.mobileconfig`
 with `TTLSInnerAuthentication` = `PAP` ([clients.md](clients.md)).
 
+**`Ignoring duplicate packet from client ... due to unfinished request in component
+authenticate module eap_peap`** during PEAP logins — expected, not an error. Each PEAP login
+asks the LDAP outpost twice, and with `search_mode: direct` each search goes through to
+authentik (about 0.1-0.2 s each, over a second for the first after a start). A new LDAP
+connection adds a bind, which runs authentik's bind flow; FreeRADIUS opens one after 60 s
+of quiet and at the latest every 5 minutes. The access point retransmits while it waits,
+FreeRADIUS drops the copy and answers the original. Measured against authentik 2026.8.3:
+about 4 s for the very first login after a start, 0.7-2 s afterwards. Only if logins
+actually time out is authentik's response time worth a look.
+
 **PEAP login refused, `peap: no active WLAN user with a WiFi password: <user>`** — the
 directory had no match: the user is deactivated, not in the WLAN group, has no WiFi
 password yet, or typed a different username. EAP-TTLS is unaffected. A name with a

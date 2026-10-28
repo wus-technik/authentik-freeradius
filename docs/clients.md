@@ -13,14 +13,25 @@ Username: the authentik username. Password: the WiFi password from the portal ti
 | Platform | Steps |
 |---|---|
 | Windows 10/11 | Pick the SSID, enter username and WiFi password, click **Connect** when it asks about the server — after checking the certificate name under **Show certificate details**. |
-| iOS / iPadOS | Pick the SSID, enter username and password, tap **Trust** after checking the certificate name. |
+| iOS / iPadOS | Pick the SSID, enter username and password, tap **Trust** after checking the certificate name. Verified on iOS: works without a profile, wrong passwords are refused. |
 | macOS | As iOS; macOS may ask for the login password to store the certificate trust. |
 | Android 11+ | EAP method **PEAP**, phase 2 **MSCHAPV2**, CA certificate **Use system certificates**, domain = the RADIUS server name, identity = username, anonymous identity empty. |
 
 The certificate name to confirm is shown on the WiFi password page. A different name means
 a different network: do not connect.
 
-Verified on real devices: pending, see the checklist in [migration.md](migration.md).
+**iOS remembers the trust per SSID and username.** A device that once tapped **Trust**
+connects again without asking. A different username
+for the same SSID (`jdoe` → `jdoe@example.com`) asks again. To see the dialog once more,
+use **Forget This Network** first. iOS does check the server certificate without a
+profile; it just does not ask twice.
+
+**Devices that take any method** — iOS and macOS joining by hand — get PEAP, because the
+server offers PEAP first when it is enabled. Devices with an EAP-TTLS profile decline PEAP
+and get TTLS as before.
+
+Verified on real devices: iOS. Windows, macOS and Android pending, see the checklist in
+[migration.md](migration.md).
 
 ## The certificate trust problem
 
