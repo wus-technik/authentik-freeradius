@@ -20,6 +20,12 @@ Username: the authentik username. Password: the WiFi password from the portal ti
 The certificate name to confirm is shown on the WiFi password page. A different name means
 a different network: do not connect.
 
+**Android prerequisite for manual setup:** With **Use system certificates** selected,
+you must also enter the RADIUS server's certificate name in the **Domain** field:
+`radius.wus-technik.com` for the W&S network. Selecting the CA certificate alone is not
+enough. Use the server name shown on the WiFi password page, not your email domain or
+username. This applies to the profile-free PEAP setup above as well as TTLS below.
+
 **iOS remembers the trust per SSID and username.** A device that once tapped **Trust**
 connects again without asking. A different username
 for the same SSID (`jdoe` → `jdoe@example.com`) asks again. To see the dialog once more,
